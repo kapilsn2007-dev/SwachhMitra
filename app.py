@@ -15,7 +15,11 @@ from flask import (
     url_for,
 )
 
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import (
+    check_password_hash,
+    generate_password_hash,
+)
+
 from werkzeug.utils import secure_filename
 
 from PIL import Image
@@ -35,18 +39,26 @@ app.config["SECRET_KEY"] = os.environ.get(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-DATABASE = str(BASE_DIR / "swachhmitra.db")
+DATABASE = str(
+    BASE_DIR / "swachhmitra.db"
+)
 
-UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
+UPLOAD_FOLDER = (
+    BASE_DIR / "static" / "uploads"
+)
 
 UPLOAD_FOLDER.mkdir(
     parents=True,
     exist_ok=True
 )
 
-app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
+app.config["UPLOAD_FOLDER"] = str(
+    UPLOAD_FOLDER
+)
 
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = (
+    5 * 1024 * 1024
+)
 
 
 # =========================================================
@@ -68,9 +80,14 @@ ADMIN_PASSWORD = "admin123"
 # =========================================================
 # AI CLASSIFIER
 # =========================================================
-
-# Render free instances have limited RAM.
-# Therefore the heavy AI model is disabled on Render.
+#
+# IMPORTANT:
+# Render free instances have limited memory.
+# Therefore the heavy Hugging Face model is NOT loaded
+# when running on Render.
+#
+# Locally, the classifier can still be used.
+# =========================================================
 
 if os.environ.get("RENDER"):
 
@@ -133,7 +150,7 @@ def close_db(error=None):
 
 
 # =========================================================
-# INITIALIZE DATABASE
+# DATABASE INITIALIZATION
 # =========================================================
 
 def init_db():
@@ -143,7 +160,7 @@ def init_db():
     )
 
     # =====================================================
-    # USERS TABLE
+    # USERS
     # =====================================================
 
     db.execute(
@@ -163,7 +180,7 @@ def init_db():
     )
 
     # =====================================================
-    # REPORTS TABLE
+    # REPORTS
     # =====================================================
 
     db.execute(
@@ -187,7 +204,7 @@ def init_db():
     )
 
     # =====================================================
-    # DUSTBINS TABLE
+    # DUSTBINS
     # =====================================================
 
     db.execute(
@@ -354,7 +371,7 @@ def init_db():
         db.commit()
 
     # =====================================================
-    # BACKWARD COMPATIBILITY FOR USERS TABLE
+    # BACKWARD COMPATIBILITY
     # =====================================================
 
     user_columns = [
@@ -390,10 +407,6 @@ def init_db():
             ADD COLUMN profile_image TEXT DEFAULT ''
             """
         )
-
-    # =====================================================
-    # BACKWARD COMPATIBILITY FOR REPORTS TABLE
-    # =====================================================
 
     report_columns = [
         row[1]
@@ -550,6 +563,13 @@ def admin_required(view):
 # TRANSLATIONS
 # =========================================================
 
+SUPPORTED_LANGUAGES = {
+    "mr": "मराठी",
+    "en": "English",
+    "hi": "हिन्दी"
+}
+
+
 TRANSLATIONS = {
 
     "en": {
@@ -609,15 +629,18 @@ TRANSLATIONS = {
 @app.context_processor
 def inject_globals():
 
-    language = session.get(
+    current_language = session.get(
         "language",
         "mr"
     )
 
     return {
-        "current_language": language,
+        "current_language": current_language,
+
+        "supported_languages": SUPPORTED_LANGUAGES,
+
         "t": TRANSLATIONS.get(
-            language,
+            current_language,
             TRANSLATIONS["mr"]
         )
     }
@@ -676,7 +699,7 @@ def home():
 
 
 # =========================================================
-# LANGUAGE
+# SET LANGUAGE
 # =========================================================
 
 @app.route(
@@ -684,7 +707,7 @@ def home():
 )
 def set_language(language):
 
-    if language not in TRANSLATIONS:
+    if language not in SUPPORTED_LANGUAGES:
 
         language = "mr"
 
@@ -1184,7 +1207,9 @@ def report_waste():
 
                         if detected_type:
 
-                            waste_type = detected_type
+                            waste_type = (
+                                detected_type
+                            )
 
                 except Exception:
 
@@ -1276,7 +1301,10 @@ def admin_dashboard():
     ).fetchall()
 
     total_reports = db.execute(
-        "SELECT COUNT(*) FROM reports"
+        """
+        SELECT COUNT(*)
+        FROM reports
+        """
     ).fetchone()[0]
 
     reported_count = db.execute(
@@ -1441,9 +1469,10 @@ def report_status(report_id):
             url_for("dashboard")
         )
 
-    return render_template(
-        "status.html",
-        report=report
+    # Your current repository does not have status.html.
+    # Redirecting to dashboard avoids a TemplateNotFound error.
+    return redirect(
+        url_for("dashboard")
     )
 
 
@@ -1688,7 +1717,7 @@ init_db()
 
 
 # =========================================================
-# RUN APP
+# RUN APPLICATION
 # =========================================================
 
 if __name__ == "__main__":
