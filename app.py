@@ -45,6 +45,7 @@ UPLOAD_FOLDER.mkdir(
 )
 
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
+
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 
 
@@ -60,6 +61,7 @@ ALLOWED_EXTENSIONS = {
 }
 
 ADMIN_EMAIL = "admin@swachhmitra.com"
+
 ADMIN_PASSWORD = "admin123"
 
 
@@ -67,10 +69,17 @@ ADMIN_PASSWORD = "admin123"
 # AI CLASSIFIER
 # =========================================================
 
+# Render free instances have limited RAM.
+# Therefore the heavy AI model is disabled on Render.
+
 if os.environ.get("RENDER"):
+
     classifier = None
+
 else:
+
     try:
+
         from transformers import pipeline
 
         classifier = pipeline(
@@ -79,6 +88,7 @@ else:
         )
 
     except Exception:
+
         classifier = None
 
 
@@ -93,12 +103,17 @@ WASTE_MAP = {
 
 
 # =========================================================
-# DATABASE
+# DATABASE CONNECTION
 # =========================================================
 
 def get_db():
+
     if "db" not in g:
-        g.db = sqlite3.connect(DATABASE)
+
+        g.db = sqlite3.connect(
+            DATABASE
+        )
+
         g.db.row_factory = sqlite3.Row
 
     return g.db
@@ -106,19 +121,30 @@ def get_db():
 
 @app.teardown_appcontext
 def close_db(error=None):
-    db = g.pop("db", None)
+
+    db = g.pop(
+        "db",
+        None
+    )
 
     if db is not None:
+
         db.close()
 
 
+# =========================================================
+# INITIALIZE DATABASE
+# =========================================================
+
 def init_db():
 
-    db = sqlite3.connect(DATABASE)
+    db = sqlite3.connect(
+        DATABASE
+    )
 
-    # -----------------------------------------------------
+    # =====================================================
     # USERS TABLE
-    # -----------------------------------------------------
+    # =====================================================
 
     db.execute(
         """
@@ -136,9 +162,9 @@ def init_db():
         """
     )
 
-    # -----------------------------------------------------
+    # =====================================================
     # REPORTS TABLE
-    # -----------------------------------------------------
+    # =====================================================
 
     db.execute(
         """
@@ -160,9 +186,9 @@ def init_db():
         """
     )
 
-    # -----------------------------------------------------
+    # =====================================================
     # DUSTBINS TABLE
-    # -----------------------------------------------------
+    # =====================================================
 
     db.execute(
         """
@@ -179,16 +205,15 @@ def init_db():
         """
     )
 
-    # -----------------------------------------------------
+    # =====================================================
     # DEMO / COMMUNITY DUSTBIN LOCATIONS
-    # -----------------------------------------------------
+    # =====================================================
     #
-    # IMPORTANT:
-    # These are DEMO locations for the college project.
+    # These are demo locations for the college project.
     # They should NOT be presented as officially installed
     # PCMC dustbins unless independently verified.
     #
-    # -----------------------------------------------------
+    # =====================================================
 
     demo_dustbins = [
 
@@ -301,9 +326,9 @@ def init_db():
         ),
     ]
 
-    # -----------------------------------------------------
-    # ADD DEMO DUSTBINS ONLY IF TABLE IS EMPTY
-    # -----------------------------------------------------
+    # =====================================================
+    # INSERT DEMO DUSTBINS ONLY IF TABLE IS EMPTY
+    # =====================================================
 
     existing_dustbins = db.execute(
         "SELECT COUNT(*) FROM dustbins"
@@ -328,11 +353,9 @@ def init_db():
 
         db.commit()
 
-    # -----------------------------------------------------
-    # BACKWARD COMPATIBILITY
-    # -----------------------------------------------------
-
-    # Add missing columns to older databases if necessary.
+    # =====================================================
+    # BACKWARD COMPATIBILITY FOR USERS TABLE
+    # =====================================================
 
     user_columns = [
         row[1]
@@ -342,19 +365,35 @@ def init_db():
     ]
 
     if "address" not in user_columns:
+
         db.execute(
-            "ALTER TABLE users ADD COLUMN address TEXT DEFAULT ''"
+            """
+            ALTER TABLE users
+            ADD COLUMN address TEXT DEFAULT ''
+            """
         )
 
     if "phone" not in user_columns:
+
         db.execute(
-            "ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''"
+            """
+            ALTER TABLE users
+            ADD COLUMN phone TEXT DEFAULT ''
+            """
         )
 
     if "profile_image" not in user_columns:
+
         db.execute(
-            "ALTER TABLE users ADD COLUMN profile_image TEXT DEFAULT ''"
+            """
+            ALTER TABLE users
+            ADD COLUMN profile_image TEXT DEFAULT ''
+            """
         )
+
+    # =====================================================
+    # BACKWARD COMPATIBILITY FOR REPORTS TABLE
+    # =====================================================
 
     report_columns = [
         row[1]
@@ -364,26 +403,42 @@ def init_db():
     ]
 
     if "latitude" not in report_columns:
+
         db.execute(
-            "ALTER TABLE reports ADD COLUMN latitude TEXT DEFAULT ''"
+            """
+            ALTER TABLE reports
+            ADD COLUMN latitude TEXT DEFAULT ''
+            """
         )
 
     if "longitude" not in report_columns:
+
         db.execute(
-            "ALTER TABLE reports ADD COLUMN longitude TEXT DEFAULT ''"
+            """
+            ALTER TABLE reports
+            ADD COLUMN longitude TEXT DEFAULT ''
+            """
         )
 
     if "is_anonymous" not in report_columns:
+
         db.execute(
-            "ALTER TABLE reports ADD COLUMN is_anonymous INTEGER DEFAULT 0"
+            """
+            ALTER TABLE reports
+            ADD COLUMN is_anonymous INTEGER DEFAULT 0
+            """
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # DEFAULT ADMIN
-    # -----------------------------------------------------
+    # =====================================================
 
     admin = db.execute(
-        "SELECT id FROM users WHERE email = ?",
+        """
+        SELECT id
+        FROM users
+        WHERE email = ?
+        """,
         (ADMIN_EMAIL,)
     ).fetchone()
 
@@ -402,7 +457,9 @@ def init_db():
             (
                 "Administrator",
                 ADMIN_EMAIL,
-                generate_password_hash(ADMIN_PASSWORD)
+                generate_password_hash(
+                    ADMIN_PASSWORD
+                )
             )
         )
 
@@ -431,10 +488,17 @@ def login_required(view):
                 url_for("login")
             )
 
-        return view(*args, **kwargs)
+        return view(
+            *args,
+            **kwargs
+        )
 
     return wrapped_view
 
+
+# =========================================================
+# ADMIN REQUIRED
+# =========================================================
 
 def admin_required(view):
 
@@ -474,13 +538,16 @@ def admin_required(view):
                 url_for("dashboard")
             )
 
-        return view(*args, **kwargs)
+        return view(
+            *args,
+            **kwargs
+        )
 
     return wrapped_view
 
 
 # =========================================================
-# LANGUAGE / TRANSLATIONS
+# TRANSLATIONS
 # =========================================================
 
 TRANSLATIONS = {
@@ -535,6 +602,10 @@ TRANSLATIONS = {
 }
 
 
+# =========================================================
+# GLOBAL TEMPLATE VARIABLES
+# =========================================================
+
 @app.context_processor
 def inject_globals():
 
@@ -560,6 +631,7 @@ def inject_globals():
 def to_ist(value):
 
     if not value:
+
         return ""
 
     try:
@@ -571,9 +643,12 @@ def to_ist(value):
             tzinfo=timezone.utc
         )
 
-        ist_time = utc_time + timedelta(
-            hours=5,
-            minutes=30
+        ist_time = (
+            utc_time
+            + timedelta(
+                hours=5,
+                minutes=30
+            )
         )
 
         return ist_time.strftime(
@@ -596,12 +671,12 @@ def to_ist(value):
 def home():
 
     return render_template(
-        "index.html"
+        "home.html"
     )
 
 
 # =========================================================
-# SET LANGUAGE
+# LANGUAGE
 # =========================================================
 
 @app.route(
@@ -610,6 +685,7 @@ def home():
 def set_language(language):
 
     if language not in TRANSLATIONS:
+
         language = "mr"
 
     session["language"] = language
@@ -846,7 +922,7 @@ def admin_login():
 
 
 # =========================================================
-# DASHBOARD
+# USER DASHBOARD
 # =========================================================
 
 @app.route("/dashboard")
@@ -875,7 +951,7 @@ def dashboard():
     ).fetchall()
 
     return render_template(
-        "dashboard.html",
+        "user_dashboard.html",
         user=user,
         reports=reports
     )
@@ -1039,9 +1115,9 @@ def report_waste():
             "image"
         )
 
-        # -------------------------------------------------
+        # =================================================
         # IMAGE UPLOAD
-        # -------------------------------------------------
+        # =================================================
 
         if image and image.filename:
 
@@ -1079,9 +1155,9 @@ def report_waste():
                 image_path
             )
 
-            # ---------------------------------------------
+            # =============================================
             # AI CLASSIFICATION
-            # ---------------------------------------------
+            # =============================================
 
             if classifier is not None:
 
@@ -1102,22 +1178,21 @@ def report_waste():
                             .lower()
                         )
 
-                        detected_type = (
-                            WASTE_MAP.get(
-                                top_label
-                            )
+                        detected_type = WASTE_MAP.get(
+                            top_label
                         )
 
                         if detected_type:
+
                             waste_type = detected_type
 
                 except Exception:
 
                     pass
 
-        # -------------------------------------------------
+        # =================================================
         # REPORT CODE
-        # -------------------------------------------------
+        # =================================================
 
         report_code = (
             "SM-"
@@ -1340,16 +1415,21 @@ def report_status(report_id):
             url_for("dashboard")
         )
 
+    user = db.execute(
+        """
+        SELECT is_admin
+        FROM users
+        WHERE id = ?
+        """,
+        (session["user_id"],)
+    ).fetchone()
+
     if (
         report["user_id"] != session["user_id"]
-        and not db.execute(
-            """
-            SELECT is_admin
-            FROM users
-            WHERE id = ?
-            """,
-            (session["user_id"],)
-        ).fetchone()["is_admin"]
+        and (
+            not user
+            or not user["is_admin"]
+        )
     ):
 
         flash(
@@ -1459,7 +1539,11 @@ def add_dustbin():
             ""
         ).strip()
 
-        if not name or not latitude or not longitude:
+        if (
+            not name
+            or not latitude
+            or not longitude
+        ):
 
             flash(
                 "Name, latitude and longitude are required.",
@@ -1472,8 +1556,13 @@ def add_dustbin():
 
         try:
 
-            latitude = float(latitude)
-            longitude = float(longitude)
+            latitude = float(
+                latitude
+            )
+
+            longitude = float(
+                longitude
+            )
 
         except ValueError:
 
