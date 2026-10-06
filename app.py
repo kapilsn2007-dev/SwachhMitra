@@ -73,7 +73,6 @@ ALLOWED_EXTENSIONS = {
 }
 
 ADMIN_EMAIL = "admin@swachhmitra.com"
-
 ADMIN_PASSWORD = "admin123"
 
 
@@ -81,12 +80,10 @@ ADMIN_PASSWORD = "admin123"
 # AI CLASSIFIER
 # =========================================================
 #
-# IMPORTANT:
+# Heavy Hugging Face model is disabled on Render because
 # Render free instances have limited memory.
-# Therefore the heavy Hugging Face model is NOT loaded
-# when running on Render.
 #
-# Locally, the classifier can still be used.
+# Locally the classifier can still be loaded.
 # =========================================================
 
 if os.environ.get("RENDER"):
@@ -120,7 +117,7 @@ WASTE_MAP = {
 
 
 # =========================================================
-# DATABASE CONNECTION
+# DATABASE
 # =========================================================
 
 def get_db():
@@ -145,7 +142,6 @@ def close_db(error=None):
     )
 
     if db is not None:
-
         db.close()
 
 
@@ -160,14 +156,14 @@ def init_db():
     )
 
     # =====================================================
-    # USERS
+    # USERS TABLE
     # =====================================================
 
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+            full_name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             address TEXT DEFAULT '',
@@ -180,7 +176,7 @@ def init_db():
     )
 
     # =====================================================
-    # REPORTS
+    # REPORTS TABLE
     # =====================================================
 
     db.execute(
@@ -196,7 +192,7 @@ def init_db():
             latitude TEXT DEFAULT '',
             longitude TEXT DEFAULT '',
             status TEXT NOT NULL DEFAULT 'Reported',
-            is_anonymous INTEGER DEFAULT 0,
+            anonymous INTEGER DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
@@ -204,7 +200,7 @@ def init_db():
     )
 
     # =====================================================
-    # DUSTBINS
+    # DUSTBINS TABLE
     # =====================================================
 
     db.execute(
@@ -223,13 +219,126 @@ def init_db():
     )
 
     # =====================================================
-    # DEMO / COMMUNITY DUSTBIN LOCATIONS
+    # BACKWARD COMPATIBILITY FOR USERS
     # =====================================================
-    #
-    # These are demo locations for the college project.
-    # They should NOT be presented as officially installed
-    # PCMC dustbins unless independently verified.
-    #
+
+    user_columns = [
+        row[1]
+        for row in db.execute(
+            "PRAGMA table_info(users)"
+        ).fetchall()
+    ]
+
+    # Old database may have "name"
+    # New templates use "full_name".
+
+    if "full_name" not in user_columns:
+
+        db.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN full_name TEXT DEFAULT ''
+            """
+        )
+
+        if "name" in user_columns:
+
+            db.execute(
+                """
+                UPDATE users
+                SET full_name = name
+                WHERE full_name = ''
+                """
+            )
+
+    if "address" not in user_columns:
+
+        db.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN address TEXT DEFAULT ''
+            """
+        )
+
+    if "phone" not in user_columns:
+
+        db.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN phone TEXT DEFAULT ''
+            """
+        )
+
+    if "profile_image" not in user_columns:
+
+        db.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN profile_image TEXT DEFAULT ''
+            """
+        )
+
+    if "is_admin" not in user_columns:
+
+        db.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN is_admin INTEGER DEFAULT 0
+            """
+        )
+
+    # =====================================================
+    # BACKWARD COMPATIBILITY FOR REPORTS
+    # =====================================================
+
+    report_columns = [
+        row[1]
+        for row in db.execute(
+            "PRAGMA table_info(reports)"
+        ).fetchall()
+    ]
+
+    if "latitude" not in report_columns:
+
+        db.execute(
+            """
+            ALTER TABLE reports
+            ADD COLUMN latitude TEXT DEFAULT ''
+            """
+        )
+
+    if "longitude" not in report_columns:
+
+        db.execute(
+            """
+            ALTER TABLE reports
+            ADD COLUMN longitude TEXT DEFAULT ''
+            """
+        )
+
+    if "anonymous" not in report_columns:
+
+        db.execute(
+            """
+            ALTER TABLE reports
+            ADD COLUMN anonymous INTEGER DEFAULT 0
+            """
+        )
+
+        # If old database has is_anonymous,
+        # copy the values.
+
+        if "is_anonymous" in report_columns:
+
+            db.execute(
+                """
+                UPDATE reports
+                SET anonymous = is_anonymous
+                """
+            )
+
+    # =====================================================
+    # DEMO DUSTBIN LOCATIONS
     # =====================================================
 
     demo_dustbins = [
@@ -343,10 +452,6 @@ def init_db():
         ),
     ]
 
-    # =====================================================
-    # INSERT DEMO DUSTBINS ONLY IF TABLE IS EMPTY
-    # =====================================================
-
     existing_dustbins = db.execute(
         "SELECT COUNT(*) FROM dustbins"
     ).fetchone()[0]
@@ -368,80 +473,6 @@ def init_db():
             demo_dustbins
         )
 
-        db.commit()
-
-    # =====================================================
-    # BACKWARD COMPATIBILITY
-    # =====================================================
-
-    user_columns = [
-        row[1]
-        for row in db.execute(
-            "PRAGMA table_info(users)"
-        ).fetchall()
-    ]
-
-    if "address" not in user_columns:
-
-        db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN address TEXT DEFAULT ''
-            """
-        )
-
-    if "phone" not in user_columns:
-
-        db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN phone TEXT DEFAULT ''
-            """
-        )
-
-    if "profile_image" not in user_columns:
-
-        db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN profile_image TEXT DEFAULT ''
-            """
-        )
-
-    report_columns = [
-        row[1]
-        for row in db.execute(
-            "PRAGMA table_info(reports)"
-        ).fetchall()
-    ]
-
-    if "latitude" not in report_columns:
-
-        db.execute(
-            """
-            ALTER TABLE reports
-            ADD COLUMN latitude TEXT DEFAULT ''
-            """
-        )
-
-    if "longitude" not in report_columns:
-
-        db.execute(
-            """
-            ALTER TABLE reports
-            ADD COLUMN longitude TEXT DEFAULT ''
-            """
-        )
-
-    if "is_anonymous" not in report_columns:
-
-        db.execute(
-            """
-            ALTER TABLE reports
-            ADD COLUMN is_anonymous INTEGER DEFAULT 0
-            """
-        )
-
     # =====================================================
     # DEFAULT ADMIN
     # =====================================================
@@ -460,7 +491,7 @@ def init_db():
         db.execute(
             """
             INSERT INTO users (
-                name,
+                full_name,
                 email,
                 password_hash,
                 is_admin
@@ -477,7 +508,6 @@ def init_db():
         )
 
     db.commit()
-
     db.close()
 
 
@@ -548,7 +578,7 @@ def admin_required(view):
             )
 
             return redirect(
-                url_for("dashboard")
+                url_for("user_dashboard")
             )
 
         return view(
@@ -560,7 +590,7 @@ def admin_required(view):
 
 
 # =========================================================
-# TRANSLATIONS
+# LANGUAGES
 # =========================================================
 
 SUPPORTED_LANGUAGES = {
@@ -570,60 +600,531 @@ SUPPORTED_LANGUAGES = {
 }
 
 
+# =========================================================
+# TRANSLATIONS
+# =========================================================
+
 TRANSLATIONS = {
 
     "en": {
 
+        "SwachhMitra": "SwachhMitra",
+
         "home": "Home",
-        "admin_dashboard": "Admin Dashboard",
         "dashboard": "Dashboard",
-        "report_waste": "Report Waste",
-        "profile": "My Profile",
-        "logout": "Logout",
+        "admin_dashboard": "Admin Dashboard",
+
         "login": "Login",
         "register": "Register",
-        "welcome": "Welcome to SwachhMitra",
-        "dustbins": "Dustbins",
-        "community_survey": "Community Survey",
+        "logout": "Logout",
+
+        "admin_login": "Admin Login",
+        "default_admin_account":
+            "Default admin account: admin@swachhmitra.com",
+
+        "admin_email": "Admin Email",
+        "password": "Password",
+
+        "user_login": "User Login",
+        "user_registration": "User Registration",
+
+        "email": "Email",
+        "full_name": "Full Name",
+        "phone_number": "Phone Number",
+        "address_locality": "Address / Locality",
+
+        "confirm_password": "Confirm Password",
+
+        "new_user": "New user?",
+        "register_here": "Register here",
+        "already_account": "Already have an account?",
+        "log_in": "Log in",
+
+        "my_profile": "My Profile",
+        "save_profile": "Save Profile",
+        "view_profile": "View Profile",
+        "profile_description":
+            "View and update your personal information.",
+        "email_cannot_change":
+            "Email address cannot be changed.",
+        "enter_phone":
+            "Enter phone number",
+        "enter_address":
+            "Enter your address",
+        "back_to_dashboard":
+            "Back to Dashboard",
+
+        "report_garbage": "Report Garbage",
+        "report_garbage_help":
+            "Submit a garbage report with details and location.",
+        "report_description":
+            "Report garbage in your locality and help keep the community clean.",
+
+        "waste_type": "Waste Type",
+        "select_waste_type":
+            "Select waste type",
+
+        "dry_waste": "Dry Waste",
+        "wet_waste": "Wet Waste",
+        "plastic_waste": "Plastic Waste",
+        "e_waste": "E-Waste",
+        "construction": "Construction Waste",
+        "medical": "Medical Waste",
+        "mixed_waste": "Mixed Waste",
+        "other": "Other",
+
+        "garbage_image":
+            "Garbage Image",
+        "ai_detection_note":
+            "AI can help identify the waste type from the uploaded image.",
+        "upload_clear_photo":
+            "Upload a clear photo.",
+        "maximum_size":
+            "Maximum size: 5 MB.",
+
+        "description": "Description",
+        "description_placeholder":
+            "Describe the garbage problem...",
+
+        "location_locality":
+            "Location / Locality",
+        "location_example":
+            "Example: Pimpri, Pune",
+
+        "latitude": "Latitude",
+        "longitude": "Longitude",
+        "optional": "Optional",
+
+        "anonymous_report":
+            "Submit this report anonymously",
+
+        "submit_garbage_report":
+            "Submit Garbage Report",
+
+        "garbage_reports":
+            "My Garbage Reports",
+
+        "report_id": "Report ID",
+        "location": "Location",
+        "status": "Status",
+        "date": "Date",
+
+        "reported": "Reported",
+        "verified": "Verified",
+        "assigned": "Assigned",
+        "cleaning_in_progress":
+            "Cleaning in Progress",
+        "cleaned": "Cleaned",
+        "closed": "Closed",
+
+        "not_provided": "Not provided",
+        "no_reports": "You have not submitted any reports yet.",
+        "first_report":
+            "Submit Your First Report",
+
+        "home_description":
+            "A community-driven platform for reporting and managing waste.",
+        "home_features":
+            "Report garbage, track its status and help create a cleaner locality.",
+
+        "create_account":
+            "Create Account",
+        "go_to_dashboard":
+            "Go to Dashboard",
+        "go_to_admin_dashboard":
+            "Go to Admin Dashboard",
+
+        "admin_welcome":
+            "Welcome",
+        "manage_reports":
+            "Manage garbage reports submitted by users.",
+
+        "registered_users":
+            "Registered Users",
+        "total_reports":
+            "Total Reports",
+        "awaiting_action":
+            "Awaiting Action",
+        "cleaned_reports":
+            "Cleaned Reports",
+
+        "garbage_report_management":
+            "Garbage Report Management",
+
+        "image": "Image",
+        "reporter": "Reporter",
+        "current_status":
+            "Current Status",
+        "update_status":
+            "Update Status",
+        "view_image":
+            "View Image",
+        "no_image":
+            "No image",
+        "anonymous":
+            "Anonymous",
+        "unknown_user":
+            "Unknown User",
+        "new_report_status":
+            "New report status",
+        "save_status":
+            "Save Status",
+
+        "no_garbage_reports":
+            "No garbage reports",
+        "submitted_reports_here":
+            "Submitted garbage reports will appear here.",
 
     },
 
     "mr": {
 
+        "SwachhMitra": "स्वच्छमित्र",
+
         "home": "मुख्यपृष्ठ",
-        "admin_dashboard": "प्रशासक डॅशबोर्ड",
         "dashboard": "डॅशबोर्ड",
-        "report_waste": "कचरा नोंदवा",
-        "profile": "माझे प्रोफाइल",
-        "logout": "लॉगआउट",
+        "admin_dashboard": "प्रशासक डॅशबोर्ड",
+
         "login": "लॉगिन",
         "register": "नोंदणी",
-        "welcome": "स्वच्छमित्रमध्ये आपले स्वागत",
-        "dustbins": "कचरापेट्या",
-        "community_survey": "समुदाय सर्वेक्षण",
+        "logout": "लॉगआउट",
+
+        "admin_login": "प्रशासक लॉगिन",
+        "default_admin_account":
+            "डीफॉल्ट प्रशासक खाते: admin@swachhmitra.com",
+
+        "admin_email": "प्रशासक ईमेल",
+        "password": "पासवर्ड",
+
+        "user_login": "वापरकर्ता लॉगिन",
+        "user_registration": "वापरकर्ता नोंदणी",
+
+        "email": "ईमेल",
+        "full_name": "पूर्ण नाव",
+        "phone_number": "फोन नंबर",
+        "address_locality": "पत्ता / परिसर",
+
+        "confirm_password": "पासवर्डची पुष्टी करा",
+
+        "new_user": "नवीन वापरकर्ता?",
+        "register_here": "येथे नोंदणी करा",
+        "already_account": "आधीच खाते आहे?",
+        "log_in": "लॉगिन करा",
+
+        "my_profile": "माझे प्रोफाइल",
+        "save_profile": "प्रोफाइल जतन करा",
+        "view_profile": "प्रोफाइल पहा",
+        "profile_description":
+            "आपली वैयक्तिक माहिती पहा आणि अपडेट करा.",
+        "email_cannot_change":
+            "ईमेल बदलता येणार नाही.",
+        "enter_phone":
+            "फोन नंबर टाका",
+        "enter_address":
+            "आपला पत्ता टाका",
+        "back_to_dashboard":
+            "डॅशबोर्डवर परत जा",
+
+        "report_garbage": "कचरा नोंदवा",
+        "report_garbage_help":
+            "कचऱ्याची माहिती आणि स्थान देऊन अहवाल नोंदवा.",
+        "report_description":
+            "आपल्या परिसरातील कचरा नोंदवा आणि परिसर स्वच्छ ठेवण्यास मदत करा.",
+
+        "waste_type": "कचऱ्याचा प्रकार",
+        "select_waste_type":
+            "कचऱ्याचा प्रकार निवडा",
+
+        "dry_waste": "सुका कचरा",
+        "wet_waste": "ओला कचरा",
+        "plastic_waste": "प्लास्टिक कचरा",
+        "e_waste": "ई-कचरा",
+        "construction": "बांधकाम कचरा",
+        "medical": "वैद्यकीय कचरा",
+        "mixed_waste": "मिश्र कचरा",
+        "other": "इतर",
+
+        "garbage_image":
+            "कचऱ्याचा फोटो",
+        "ai_detection_note":
+            "अपलोड केलेल्या फोटोमधून AI कचऱ्याचा प्रकार ओळखण्यास मदत करू शकते.",
+        "upload_clear_photo":
+            "स्वच्छ फोटो अपलोड करा.",
+        "maximum_size":
+            "कमाल आकार: 5 MB.",
+
+        "description": "वर्णन",
+        "description_placeholder":
+            "कचऱ्याच्या समस्येचे वर्णन करा...",
+
+        "location_locality":
+            "स्थान / परिसर",
+        "location_example":
+            "उदा.: पिंपरी, पुणे",
+
+        "latitude": "अक्षांश",
+        "longitude": "रेखांश",
+        "optional": "ऐच्छिक",
+
+        "anonymous_report":
+            "हा अहवाल अनामिक म्हणून नोंदवा",
+
+        "submit_garbage_report":
+            "कचरा अहवाल सबमिट करा",
+
+        "garbage_reports":
+            "माझे कचरा अहवाल",
+
+        "report_id": "अहवाल क्रमांक",
+        "location": "स्थान",
+        "status": "स्थिती",
+        "date": "दिनांक",
+
+        "reported": "नोंदवले",
+        "verified": "पडताळले",
+        "assigned": "नियुक्त केले",
+        "cleaning_in_progress":
+            "साफसफाई सुरू",
+        "cleaned": "साफ केले",
+        "closed": "बंद",
+
+        "not_provided": "दिलेली नाही",
+        "no_reports":
+            "आपण अद्याप कोणताही अहवाल नोंदवलेला नाही.",
+        "first_report":
+            "पहिला अहवाल नोंदवा",
+
+        "home_description":
+            "कचरा नोंदणी आणि व्यवस्थापनासाठी समुदाय-आधारित प्लॅटफॉर्म.",
+        "home_features":
+            "कचरा नोंदवा, त्याची स्थिती तपासा आणि स्वच्छ परिसर तयार करण्यात मदत करा.",
+
+        "create_account":
+            "खाते तयार करा",
+        "go_to_dashboard":
+            "डॅशबोर्डवर जा",
+        "go_to_admin_dashboard":
+            "प्रशासक डॅशबोर्डवर जा",
+
+        "admin_welcome":
+            "स्वागत",
+        "manage_reports":
+            "वापरकर्त्यांनी नोंदवलेल्या कचरा अहवालांचे व्यवस्थापन करा.",
+
+        "registered_users":
+            "नोंदणीकृत वापरकर्ते",
+        "total_reports":
+            "एकूण अहवाल",
+        "awaiting_action":
+            "कारवाईसाठी प्रतीक्षा",
+        "cleaned_reports":
+            "साफ केलेले अहवाल",
+
+        "garbage_report_management":
+            "कचरा अहवाल व्यवस्थापन",
+
+        "image": "फोटो",
+        "reporter": "अहवालकर्ता",
+        "current_status":
+            "सध्याची स्थिती",
+        "update_status":
+            "स्थिती अपडेट करा",
+        "view_image":
+            "फोटो पहा",
+        "no_image":
+            "फोटो नाही",
+        "anonymous":
+            "अनामिक",
+        "unknown_user":
+            "अज्ञात वापरकर्ता",
+        "new_report_status":
+            "नवीन अहवाल स्थिती",
+        "save_status":
+            "स्थिती जतन करा",
+
+        "no_garbage_reports":
+            "कचरा अहवाल नाहीत",
+        "submitted_reports_here":
+            "सबमिट केलेले कचरा अहवाल येथे दिसतील.",
 
     },
 
     "hi": {
 
+        "SwachhMitra": "स्वच्छमित्र",
+
         "home": "मुख्य पृष्ठ",
-        "admin_dashboard": "प्रशासक डैशबोर्ड",
         "dashboard": "डैशबोर्ड",
-        "report_waste": "कचरा रिपोर्ट करें",
-        "profile": "मेरी प्रोफ़ाइल",
-        "logout": "लॉगआउट",
+        "admin_dashboard": "प्रशासक डैशबोर्ड",
+
         "login": "लॉगिन",
         "register": "पंजीकरण",
-        "welcome": "स्वच्छमित्र में आपका स्वागत है",
-        "dustbins": "कूड़ेदान",
-        "community_survey": "समुदाय सर्वेक्षण",
+        "logout": "लॉगआउट",
+
+        "admin_login": "प्रशासक लॉगिन",
+        "default_admin_account":
+            "डिफ़ॉल्ट प्रशासक खाता: admin@swachhmitra.com",
+
+        "admin_email": "प्रशासक ईमेल",
+        "password": "पासवर्ड",
+
+        "user_login": "उपयोगकर्ता लॉगिन",
+        "user_registration": "उपयोगकर्ता पंजीकरण",
+
+        "email": "ईमेल",
+        "full_name": "पूरा नाम",
+        "phone_number": "फोन नंबर",
+        "address_locality": "पता / क्षेत्र",
+
+        "confirm_password": "पासवर्ड की पुष्टि करें",
+
+        "new_user": "नए उपयोगकर्ता?",
+        "register_here": "यहाँ पंजीकरण करें",
+        "already_account": "पहले से खाता है?",
+        "log_in": "लॉगिन करें",
+
+        "my_profile": "मेरी प्रोफ़ाइल",
+        "save_profile": "प्रोफ़ाइल सहेजें",
+        "view_profile": "प्रोफ़ाइल देखें",
+        "profile_description":
+            "अपनी व्यक्तिगत जानकारी देखें और अपडेट करें.",
+        "email_cannot_change":
+            "ईमेल बदला नहीं जा सकता.",
+        "enter_phone":
+            "फोन नंबर दर्ज करें",
+        "enter_address":
+            "अपना पता दर्ज करें",
+        "back_to_dashboard":
+            "डैशबोर्ड पर वापस जाएँ",
+
+        "report_garbage": "कचरा रिपोर्ट करें",
+        "report_garbage_help":
+            "जानकारी और स्थान के साथ कचरे की रिपोर्ट करें.",
+        "report_description":
+            "अपने क्षेत्र में कचरे की रिपोर्ट करें और समुदाय को स्वच्छ रखने में मदद करें.",
+
+        "waste_type": "कचरे का प्रकार",
+        "select_waste_type":
+            "कचरे का प्रकार चुनें",
+
+        "dry_waste": "सूखा कचरा",
+        "wet_waste": "गीला कचरा",
+        "plastic_waste": "प्लास्टिक कचरा",
+        "e_waste": "ई-कचरा",
+        "construction": "निर्माण कचरा",
+        "medical": "चिकित्सा कचरा",
+        "mixed_waste": "मिश्रित कचरा",
+        "other": "अन्य",
+
+        "garbage_image":
+            "कचरे की फोटो",
+        "ai_detection_note":
+            "अपलोड की गई फोटो से AI कचरे के प्रकार की पहचान करने में मदद कर सकता है.",
+        "upload_clear_photo":
+            "एक साफ फोटो अपलोड करें.",
+        "maximum_size":
+            "अधिकतम आकार: 5 MB.",
+
+        "description": "विवरण",
+        "description_placeholder":
+            "कचरे की समस्या का वर्णन करें...",
+
+        "location_locality":
+            "स्थान / क्षेत्र",
+        "location_example":
+            "उदाहरण: पिंपरी, पुणे",
+
+        "latitude": "अक्षांश",
+        "longitude": "देशांतर",
+        "optional": "वैकल्पिक",
+
+        "anonymous_report":
+            "इस रिपोर्ट को गुमनाम रूप से जमा करें",
+
+        "submit_garbage_report":
+            "कचरा रिपोर्ट जमा करें",
+
+        "garbage_reports":
+            "मेरी कचरा रिपोर्ट",
+
+        "report_id": "रिपोर्ट ID",
+        "location": "स्थान",
+        "status": "स्थिति",
+        "date": "दिनांक",
+
+        "reported": "रिपोर्ट किया गया",
+        "verified": "सत्यापित",
+        "assigned": "सौंपा गया",
+        "cleaning_in_progress":
+            "सफाई जारी है",
+        "cleaned": "साफ किया गया",
+        "closed": "बंद",
+
+        "not_provided": "उपलब्ध नहीं",
+        "no_reports":
+            "आपने अभी तक कोई रिपोर्ट जमा नहीं की है.",
+        "first_report":
+            "अपनी पहली रिपोर्ट जमा करें",
+
+        "home_description":
+            "कचरा रिपोर्टिंग और प्रबंधन के लिए समुदाय-आधारित प्लेटफ़ॉर्म.",
+        "home_features":
+            "कचरे की रिपोर्ट करें, स्थिति ट्रैक करें और स्वच्छ क्षेत्र बनाने में मदद करें.",
+
+        "create_account":
+            "खाता बनाएँ",
+        "go_to_dashboard":
+            "डैशबोर्ड पर जाएँ",
+        "go_to_admin_dashboard":
+            "प्रशासक डैशबोर्ड पर जाएँ",
+
+        "admin_welcome":
+            "स्वागत",
+        "manage_reports":
+            "उपयोगकर्ताओं द्वारा जमा की गई कचरा रिपोर्ट प्रबंधित करें.",
+
+        "registered_users":
+            "पंजीकृत उपयोगकर्ता",
+        "total_reports":
+            "कुल रिपोर्ट",
+        "awaiting_action":
+            "कार्रवाई की प्रतीक्षा",
+        "cleaned_reports":
+            "साफ की गई रिपोर्ट",
+
+        "garbage_report_management":
+            "कचरा रिपोर्ट प्रबंधन",
+
+        "image": "फोटो",
+        "reporter": "रिपोर्टकर्ता",
+        "current_status":
+            "वर्तमान स्थिति",
+        "update_status":
+            "स्थिति अपडेट करें",
+        "view_image":
+            "फोटो देखें",
+        "no_image":
+            "फोटो नहीं",
+        "anonymous":
+            "गुमनाम",
+        "unknown_user":
+            "अज्ञात उपयोगकर्ता",
+        "new_report_status":
+            "नई रिपोर्ट स्थिति",
+        "save_status":
+            "स्थिति सहेजें",
+
+        "no_garbage_reports":
+            "कोई कचरा रिपोर्ट नहीं",
+        "submitted_reports_here":
+            "जमा की गई कचरा रिपोर्ट यहाँ दिखाई देंगी.",
 
     }
 }
 
 
 # =========================================================
-# GLOBAL TEMPLATE VARIABLES
+# TEMPLATE GLOBALS
 # =========================================================
 
 @app.context_processor
@@ -634,15 +1135,59 @@ def inject_globals():
         "mr"
     )
 
+    db = get_db()
+
+    current_user_name = ""
+    current_user_role = "user"
+    is_logged_in = False
+
+    if "user_id" in session:
+
+        user = db.execute(
+            """
+            SELECT *
+            FROM users
+            WHERE id = ?
+            """,
+            (session["user_id"],)
+        ).fetchone()
+
+        if user:
+
+            is_logged_in = True
+
+            current_user_name = (
+                user["full_name"]
+                or ""
+            )
+
+            if user["is_admin"]:
+
+                current_user_role = "admin"
+
     return {
-        "current_language": current_language,
 
-        "supported_languages": SUPPORTED_LANGUAGES,
-
-        "t": TRANSLATIONS.get(
+        "current_language":
             current_language,
-            TRANSLATIONS["mr"]
-        )
+
+        "supported_languages":
+            SUPPORTED_LANGUAGES,
+
+        "t":
+            TRANSLATIONS.get(
+                current_language,
+                TRANSLATIONS["mr"]
+            ),
+
+        "is_logged_in":
+            is_logged_in,
+
+        "current_user_name":
+            current_user_name,
+
+        "current_user_role":
+            current_user_role,
+
     }
 
 
@@ -654,7 +1199,6 @@ def inject_globals():
 def to_ist(value):
 
     if not value:
-
         return ""
 
     try:
@@ -699,7 +1243,7 @@ def home():
 
 
 # =========================================================
-# SET LANGUAGE
+# LANGUAGE
 # =========================================================
 
 @app.route(
@@ -731,8 +1275,8 @@ def register():
 
     if request.method == "POST":
 
-        name = request.form.get(
-            "name",
+        full_name = request.form.get(
+            "full_name",
             ""
         ).strip()
 
@@ -746,20 +1290,41 @@ def register():
             ""
         )
 
-        address = request.form.get(
-            "address",
+        confirm_password = request.form.get(
+            "confirm_password",
             ""
-        ).strip()
+        )
 
-        phone = request.form.get(
-            "phone",
-            ""
-        ).strip()
-
-        if not name or not email or not password:
+        if (
+            not full_name
+            or not email
+            or not password
+        ):
 
             flash(
                 "Please fill all required fields.",
+                "danger"
+            )
+
+            return render_template(
+                "register.html"
+            )
+
+        if password != confirm_password:
+
+            flash(
+                "Passwords do not match.",
+                "danger"
+            )
+
+            return render_template(
+                "register.html"
+            )
+
+        if len(password) < 6:
+
+            flash(
+                "Password must be at least 6 characters.",
                 "danger"
             )
 
@@ -792,20 +1357,18 @@ def register():
         db.execute(
             """
             INSERT INTO users (
-                name,
+                full_name,
                 email,
-                password_hash,
-                address,
-                phone
+                password_hash
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?)
             """,
             (
-                name,
+                full_name,
                 email,
-                generate_password_hash(password),
-                address,
-                phone
+                generate_password_hash(
+                    password
+                )
             )
         )
 
@@ -870,8 +1433,18 @@ def login():
 
             session["user_id"] = user["id"]
 
+            if user["is_admin"]:
+
+                return redirect(
+                    url_for(
+                        "admin_dashboard"
+                    )
+                )
+
             return redirect(
-                url_for("dashboard")
+                url_for(
+                    "user_dashboard"
+                )
             )
 
         flash(
@@ -931,7 +1504,9 @@ def admin_login():
             session["user_id"] = user["id"]
 
             return redirect(
-                url_for("admin_dashboard")
+                url_for(
+                    "admin_dashboard"
+                )
             )
 
         flash(
@@ -950,18 +1525,9 @@ def admin_login():
 
 @app.route("/dashboard")
 @login_required
-def dashboard():
+def user_dashboard():
 
     db = get_db()
-
-    user = db.execute(
-        """
-        SELECT *
-        FROM users
-        WHERE id = ?
-        """,
-        (session["user_id"],)
-    ).fetchone()
 
     reports = db.execute(
         """
@@ -975,7 +1541,6 @@ def dashboard():
 
     return render_template(
         "user_dashboard.html",
-        user=user,
         reports=reports
     )
 
@@ -1004,13 +1569,8 @@ def profile():
 
     if request.method == "POST":
 
-        name = request.form.get(
-            "name",
-            ""
-        ).strip()
-
-        address = request.form.get(
-            "address",
+        full_name = request.form.get(
+            "full_name",
             ""
         ).strip()
 
@@ -1019,57 +1579,37 @@ def profile():
             ""
         ).strip()
 
-        image_filename = user["profile_image"]
+        address = request.form.get(
+            "address",
+            ""
+        ).strip()
 
-        profile_image = request.files.get(
-            "profile_image"
-        )
+        if not full_name:
 
-        if (
-            profile_image
-            and profile_image.filename
-        ):
-
-            extension = (
-                profile_image.filename
-                .rsplit(".", 1)[-1]
-                .lower()
+            flash(
+                "Full name is required.",
+                "danger"
             )
 
-            if extension in ALLOWED_EXTENSIONS:
-
-                filename = (
-                    f"profile_{user['id']}_"
-                    f"{uuid4().hex}.{extension}"
-                )
-
-                safe_filename = secure_filename(
-                    filename
-                )
-
-                profile_image.save(
-                    UPLOAD_FOLDER
-                    / safe_filename
-                )
-
-                image_filename = safe_filename
+            return render_template(
+                "profile.html",
+                user=user
+            )
 
         db.execute(
             """
             UPDATE users
             SET
-                name = ?,
-                address = ?,
+                full_name = ?,
                 phone = ?,
-                profile_image = ?
+                address = ?
             WHERE id = ?
             """,
             (
-                name,
-                address,
+                full_name,
                 phone,
-                image_filename,
-                user["id"]
+                address,
+                session["user_id"]
             )
         )
 
@@ -1128,7 +1668,7 @@ def report_waste():
             ""
         ).strip()
 
-        is_anonymous = 1 if request.form.get(
+        anonymous = 1 if request.form.get(
             "anonymous"
         ) else 0
 
@@ -1139,7 +1679,7 @@ def report_waste():
         )
 
         # =================================================
-        # IMAGE UPLOAD
+        # IMAGE
         # =================================================
 
         if image and image.filename:
@@ -1161,12 +1701,8 @@ def report_waste():
                     "report.html"
                 )
 
-            image_filename = (
-                f"{uuid4().hex}.{extension}"
-            )
-
             image_filename = secure_filename(
-                image_filename
+                f"{uuid4().hex}.{extension}"
             )
 
             image_path = (
@@ -1242,7 +1778,7 @@ def report_waste():
                 latitude,
                 longitude,
                 status,
-                is_anonymous
+                anonymous
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -1256,7 +1792,7 @@ def report_waste():
                 latitude,
                 longitude,
                 "Reported",
-                is_anonymous
+                anonymous
             )
         )
 
@@ -1269,7 +1805,7 @@ def report_waste():
         )
 
         return redirect(
-            url_for("dashboard")
+            url_for("user_dashboard")
         )
 
     return render_template(
@@ -1287,18 +1823,34 @@ def admin_dashboard():
 
     db = get_db()
 
+    # =====================================================
+    # REPORTS WITH USER INFORMATION
+    # =====================================================
+
     reports = db.execute(
         """
         SELECT
             reports.*,
-            users.name AS user_name,
-            users.email AS user_email
+            users.full_name,
+            users.email
         FROM reports
         LEFT JOIN users
             ON reports.user_id = users.id
         ORDER BY reports.id DESC
         """
     ).fetchall()
+
+    # =====================================================
+    # STATISTICS
+    # =====================================================
+
+    total_users = db.execute(
+        """
+        SELECT COUNT(*)
+        FROM users
+        WHERE is_admin = 0
+        """
+    ).fetchone()[0]
 
     total_reports = db.execute(
         """
@@ -1307,7 +1859,7 @@ def admin_dashboard():
         """
     ).fetchone()[0]
 
-    reported_count = db.execute(
+    reported = db.execute(
         """
         SELECT COUNT(*)
         FROM reports
@@ -1315,7 +1867,7 @@ def admin_dashboard():
         """
     ).fetchone()[0]
 
-    cleaned_count = db.execute(
+    cleaned = db.execute(
         """
         SELECT COUNT(*)
         FROM reports
@@ -1323,29 +1875,13 @@ def admin_dashboard():
         """
     ).fetchone()[0]
 
-    closed_count = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM reports
-        WHERE status = 'Closed'
-        """
-    ).fetchone()[0]
-
-    dustbin_count = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM dustbins
-        """
-    ).fetchone()[0]
-
     return render_template(
         "admin_dashboard.html",
         reports=reports,
+        total_users=total_users,
         total_reports=total_reports,
-        reported_count=reported_count,
-        cleaned_count=cleaned_count,
-        closed_count=closed_count,
-        dustbin_count=dustbin_count
+        reported=reported,
+        cleaned=cleaned
     )
 
 
@@ -1358,7 +1894,7 @@ def admin_dashboard():
     methods=["POST"]
 )
 @admin_required
-def update_status(report_id):
+def update_report_status(report_id):
 
     status = request.form.get(
         "status",
@@ -1377,7 +1913,7 @@ def update_status(report_id):
     if status not in allowed_statuses:
 
         flash(
-            "Invalid status.",
+            "Invalid report status.",
             "danger"
         )
 
@@ -1402,7 +1938,7 @@ def update_status(report_id):
     db.commit()
 
     flash(
-        "Report status updated.",
+        "Report status updated successfully.",
         "success"
     )
 
@@ -1412,7 +1948,11 @@ def update_status(report_id):
 
 
 # =========================================================
-# REPORT STATUS
+# OLD STATUS ROUTE
+# =========================================================
+#
+# Kept for compatibility if an older template still points
+# to /report/<id>/status.
 # =========================================================
 
 @app.route(
@@ -1440,23 +1980,20 @@ def report_status(report_id):
         )
 
         return redirect(
-            url_for("dashboard")
+            url_for("user_dashboard")
         )
-
-    user = db.execute(
-        """
-        SELECT is_admin
-        FROM users
-        WHERE id = ?
-        """,
-        (session["user_id"],)
-    ).fetchone()
 
     if (
         report["user_id"] != session["user_id"]
-        and (
-            not user
-            or not user["is_admin"]
+        and not (
+            db.execute(
+                """
+                SELECT is_admin
+                FROM users
+                WHERE id = ?
+                """,
+                (session["user_id"],)
+            ).fetchone()["is_admin"]
         )
     ):
 
@@ -1466,13 +2003,11 @@ def report_status(report_id):
         )
 
         return redirect(
-            url_for("dashboard")
+            url_for("user_dashboard")
         )
 
-    # Your current repository does not have status.html.
-    # Redirecting to dashboard avoids a TemplateNotFound error.
     return redirect(
-        url_for("dashboard")
+        url_for("user_dashboard")
     )
 
 
@@ -1495,9 +2030,14 @@ def certificate():
         (session["user_id"],)
     ).fetchone()
 
+    current_date = datetime.now().strftime(
+        "%d %B %Y"
+    )
+
     return render_template(
         "certificate.html",
-        user=user
+        user=user,
+        current_date=current_date
     )
 
 
@@ -1668,7 +2208,7 @@ def delete_dustbin(dustbin_id):
     db.commit()
 
     flash(
-        "Dustbin location deleted.",
+        "Dustbin location deleted successfully.",
         "success"
     )
 
@@ -1717,7 +2257,7 @@ init_db()
 
 
 # =========================================================
-# RUN APPLICATION
+# RUN
 # =========================================================
 
 if __name__ == "__main__":
