@@ -75,61 +75,191 @@ ALLOWED_EXTENSIONS = {
 ADMIN_EMAIL = "admin@swachhmitra.com"
 ADMIN_PASSWORD = "admin123"
 
+# Existing Hugging Face model
+HF_MODEL_NAME = "yangy50/garbage-classification"
+
 
 # =========================================================
-# AI CLASSIFIER
-# =========================================================
-#
-# Heavy Hugging Face model is disabled on Render because
-# Render free instances have limited memory.
-#
-# Locally the classifier can still be loaded.
-# =========================================================
-# =========================================================
 # AI WASTE CLASSIFIER
+# =========================================================
+#
+# The project continues to use the existing Hugging Face
+# garbage-classification model.
+#
+# The model is loaded LAZILY:
+#
+#     Server starts
+#          ↓
+#     No AI model loaded
+#          ↓
+#     User submits image
+#          ↓
+#     Hugging Face model loads
+#          ↓
+#     Image classified
+#
+# This avoids loading the large model during every request
+# and avoids loading it during application import.
 # =========================================================
 
 classifier = None
 
 
 def get_classifier():
+
     global classifier
 
-    if classifier is None:
-        try:
-            from transformers import pipeline
+    if classifier is not None:
+        return classifier
 
-            print("Loading AI waste classifier...")
+    try:
 
-            classifier = pipeline(
-                "image-classification",
-                model="yangy50/garbage-classification",
-                device=-1
-            )
+        from transformers import pipeline
 
-            print("AI waste classifier loaded successfully.")
+        print(
+            "================================================="
+        )
+        print(
+            "Loading Hugging Face AI waste classifier..."
+        )
+        print(
+            f"Model: {HF_MODEL_NAME}"
+        )
+        print(
+            "================================================="
+        )
 
-        except Exception as error:
-            print(
-                "AI classifier failed to load:",
-                error
-            )
+        classifier = pipeline(
+            "image-classification",
+            model=HF_MODEL_NAME,
+            device=-1
+        )
 
-            classifier = None
+        print(
+            "Hugging Face AI classifier loaded successfully."
+        )
 
-            raise RuntimeError(
-                "AI waste classifier could not be loaded."
-            )
+        return classifier
 
-    return classifier
+    except Exception as error:
+
+        print(
+            "================================================="
+        )
+        print(
+            "AI CLASSIFIER FAILED TO LOAD"
+        )
+        print(
+            str(error)
+        )
+        print(
+            "================================================="
+        )
+
+        classifier = None
+
+        raise RuntimeError(
+            "AI waste classifier could not be loaded."
+        ) from error
+
+
+# =========================================================
+# AI LABEL → PROJECT WASTE TYPE
+# =========================================================
+
 WASTE_MAP = {
     "plastic": "Plastic Waste",
+    "plastic waste": "Plastic Waste",
+
     "paper": "Dry Waste",
+    "paper waste": "Dry Waste",
+
     "cardboard": "Dry Waste",
+    "cardboard waste": "Dry Waste",
+
     "glass": "Dry Waste",
+    "glass waste": "Dry Waste",
+
     "metal": "Dry Waste",
+    "metal waste": "Dry Waste",
+
     "trash": "Mixed Waste",
+    "trash waste": "Mixed Waste",
+
+    "mixed": "Mixed Waste",
+    "mixed waste": "Mixed Waste",
 }
+
+
+def normalize_ai_label(label):
+    """
+    Convert the raw Hugging Face label into a clean
+    lowercase string.
+
+    This handles labels such as:
+
+        plastic
+        Plastic
+        plastic waste
+        PLASTIC WASTE
+    """
+
+    if label is None:
+        return ""
+
+    label = str(label).strip().lower()
+
+    # Replace underscores/hyphens with spaces
+    label = label.replace("_", " ")
+    label = label.replace("-", " ")
+
+    # Remove duplicate spaces
+    label = " ".join(
+        label.split()
+    )
+
+    return label
+
+
+def map_ai_waste_type(label):
+    """
+    Convert a Hugging Face prediction label into one
+    of the project's waste categories.
+    """
+
+    normalized_label = normalize_ai_label(
+        label
+    )
+
+    # Direct mapping
+    if normalized_label in WASTE_MAP:
+
+        return WASTE_MAP[
+            normalized_label
+        ]
+
+    # More flexible matching
+    if "plastic" in normalized_label:
+
+        return "Plastic Waste"
+
+    if (
+        "paper" in normalized_label
+        or "cardboard" in normalized_label
+        or "glass" in normalized_label
+        or "metal" in normalized_label
+    ):
+
+        return "Dry Waste"
+
+    if (
+        "trash" in normalized_label
+        or "mixed" in normalized_label
+    ):
+
+        return "Mixed Waste"
+
+    return None
 
 
 # =========================================================
@@ -158,6 +288,7 @@ def close_db(error=None):
     )
 
     if db is not None:
+
         db.close()
 
 
@@ -235,7 +366,7 @@ def init_db():
     )
 
     # =====================================================
-    # BACKWARD COMPATIBILITY FOR USERS
+    # BACKWARD COMPATIBILITY - USERS
     # =====================================================
 
     user_columns = [
@@ -244,9 +375,6 @@ def init_db():
             "PRAGMA table_info(users)"
         ).fetchall()
     ]
-
-    # Old database may have "name"
-    # New templates use "full_name".
 
     if "full_name" not in user_columns:
 
@@ -304,7 +432,7 @@ def init_db():
         )
 
     # =====================================================
-    # BACKWARD COMPATIBILITY FOR REPORTS
+    # BACKWARD COMPATIBILITY - REPORTS
     # =====================================================
 
     report_columns = [
@@ -340,9 +468,6 @@ def init_db():
             ADD COLUMN anonymous INTEGER DEFAULT 0
             """
         )
-
-        # If old database has is_anonymous,
-        # copy the values.
 
         if "is_anonymous" in report_columns:
 
@@ -1649,9 +1774,6 @@ def profile():
 # =========================================================
 # REPORT WASTE
 # =========================================================
-# =========================================================
-# REPORT WASTE
-# =========================================================
 
 @app.route(
     "/report",
@@ -1704,7 +1826,9 @@ def report_waste():
         # IMAGE
         # =====================================================
 
-        image = request.files.get("image")
+        image = request.files.get(
+            "image"
+        )
 
         if not image or not image.filename:
 
@@ -1721,8 +1845,25 @@ def report_waste():
         # CHECK FILE EXTENSION
         # =====================================================
 
-        extension = (
+        original_filename = (
             image.filename
+            or ""
+        )
+
+        if "." not in original_filename:
+
+            flash(
+                "Invalid image format. "
+                "Please upload JPG, JPEG, PNG or WEBP.",
+                "danger"
+            )
+
+            return render_template(
+                "report.html"
+            )
+
+        extension = (
+            original_filename
             .rsplit(".", 1)[-1]
             .lower()
         )
@@ -1754,9 +1895,16 @@ def report_waste():
 
         try:
 
-            image.save(image_path)
+            image.save(
+                image_path
+            )
 
-        except Exception:
+        except Exception as error:
+
+            print(
+                "Image save error:",
+                error
+            )
 
             flash(
                 "Unable to save the uploaded image.",
@@ -1768,33 +1916,116 @@ def report_waste():
             )
 
         # =====================================================
-        # AI CLASSIFICATION
+        # VALIDATE IMAGE
         # =====================================================
+
+        try:
+
+            with Image.open(
+                image_path
+            ) as check_image:
+
+                check_image.verify()
+
+        except Exception as error:
+
+            print(
+                "Invalid image error:",
+                error
+            )
+
+            try:
+
+                image_path.unlink(
+                    missing_ok=True
+                )
+
+            except Exception:
+                pass
+
+            flash(
+                "The uploaded file is not a valid image.",
+                "danger"
+            )
+
+            return render_template(
+                "report.html"
+            )
+
         # =====================================================
         # AI CLASSIFICATION
         # =====================================================
 
         waste_type = ""
 
+        ai_confidence = None
+
         try:
 
-            # Load the AI model only when an image is submitted
+            # Load the existing Hugging Face model
+            # only when classification is required.
+
             ai_classifier = get_classifier()
 
-            pil_image = Image.open(
+            # Open image safely
+            with Image.open(
                 image_path
-            ).convert("RGB")
+            ) as pil_image:
 
-            predictions = ai_classifier(
-                pil_image
-            )
+                pil_image = pil_image.convert(
+                    "RGB"
+                )
+
+                # Limit extremely large images before
+                # sending them to the classifier.
+                #
+                # This reduces unnecessary memory usage
+                # while preserving the actual image file.
+
+                max_dimension = 1600
+
+                if (
+                    pil_image.width > max_dimension
+                    or pil_image.height > max_dimension
+                ):
+
+                    pil_image.thumbnail(
+                        (
+                            max_dimension,
+                            max_dimension
+                        )
+                    )
+
+                predictions = ai_classifier(
+                    pil_image
+                )
 
             if not predictions:
+
                 raise ValueError(
                     "AI returned no predictions."
                 )
 
-            # Highest-confidence prediction
+            # =================================================
+            # SORT BY CONFIDENCE
+            # =================================================
+
+            predictions = sorted(
+                predictions,
+                key=lambda item: float(
+                    item.get(
+                        "score",
+                        0
+                    )
+                    or 0
+                ),
+                reverse=True
+            )
+
+            # =================================================
+            # TOP PREDICTION
+            # =================================================
+
             top_prediction = predictions[0]
 
             top_label = str(
@@ -1802,18 +2033,39 @@ def report_waste():
                     "label",
                     ""
                 )
-            ).strip().lower()
+            ).strip()
 
-            # Convert model label into our project category
-            waste_type = WASTE_MAP.get(
+            ai_confidence = float(
+                top_prediction.get(
+                    "score",
+                    0
+                )
+                or 0
+            )
+
+            # =================================================
+            # MAP AI LABEL
+            # =================================================
+
+            waste_type = map_ai_waste_type(
                 top_label
             )
 
             if not waste_type:
 
                 raise ValueError(
-                    f"Unsupported AI label: {top_label}"
+                    "Unsupported AI label: "
+                    + top_label
                 )
+
+            print(
+                "AI prediction:",
+                top_label,
+                "| confidence:",
+                f"{ai_confidence * 100:.2f}%",
+                "| category:",
+                waste_type
+            )
 
         except Exception as error:
 
@@ -1822,35 +2074,25 @@ def report_waste():
                 error
             )
 
+            try:
+
+                image_path.unlink(
+                    missing_ok=True
+                )
+
+            except Exception:
+                pass
+
             flash(
                 "The AI could not identify this waste image. "
                 "Please upload a clearer waste photo.",
                 "danger"
             )
 
-            try:
-                image_path.unlink(
-                    missing_ok=True
-                )
-            except Exception:
-                pass
-
             return render_template(
                 "report.html"
             )
 
-        # =====================================================
-        # REPORT CODE
-        # =====================================================
-
-        report_code = (
-            "SM-"
-            + datetime.now().strftime(
-                "%Y%m%d"
-            )
-            + "-"
-            + uuid4().hex[:6].upper()
-        )
         # =====================================================
         # REPORT CODE
         # =====================================================
@@ -1870,51 +2112,89 @@ def report_waste():
 
         db = get_db()
 
-        db.execute(
-            """
-            INSERT INTO reports (
-                report_code,
-                user_id,
-                waste_type,
-                description,
-                image_filename,
-                address,
-                latitude,
-                longitude,
-                status,
-                anonymous
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                report_code,
-                session["user_id"],
-                waste_type,
-                description,
-                image_filename,
-                address,
-                latitude,
-                longitude,
-                "Reported",
-                anonymous
-            )
-        )
+        try:
 
-        db.commit()
+            db.execute(
+                """
+                INSERT INTO reports (
+                    report_code,
+                    user_id,
+                    waste_type,
+                    description,
+                    image_filename,
+                    address,
+                    latitude,
+                    longitude,
+                    status,
+                    anonymous
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    report_code,
+                    session["user_id"],
+                    waste_type,
+                    description,
+                    image_filename,
+                    address,
+                    latitude,
+                    longitude,
+                    "Reported",
+                    anonymous
+                )
+            )
+
+            db.commit()
+
+        except Exception as error:
+
+            print(
+                "Database error:",
+                error
+            )
+
+            try:
+
+                image_path.unlink(
+                    missing_ok=True
+                )
+
+            except Exception:
+                pass
+
+            flash(
+                "Unable to save the garbage report.",
+                "danger"
+            )
+
+            return render_template(
+                "report.html"
+            )
 
         # =====================================================
         # SUCCESS
         # =====================================================
 
+        confidence_message = ""
+
+        if ai_confidence is not None:
+
+            confidence_message = (
+                f" ({ai_confidence * 100:.1f}% confidence)"
+            )
+
         flash(
             f"Report submitted successfully! "
-            f"AI detected: {waste_type}. "
+            f"AI detected: {waste_type}"
+            f"{confidence_message}. "
             f"Report ID: {report_code}",
             "success"
         )
 
         return redirect(
-            url_for("user_dashboard")
+            url_for(
+                "user_dashboard"
+            )
         )
 
     # =========================================================
@@ -2063,10 +2343,6 @@ def update_report_status(report_id):
 # =========================================================
 # OLD STATUS ROUTE
 # =========================================================
-#
-# Kept for compatibility if an older template still points
-# to /report/<id>/status.
-# =========================================================
 
 @app.route(
     "/report/<int:report_id>/status"
@@ -2096,18 +2372,23 @@ def report_status(report_id):
             url_for("user_dashboard")
         )
 
+    current_user = db.execute(
+        """
+        SELECT is_admin
+        FROM users
+        WHERE id = ?
+        """,
+        (session["user_id"],)
+    ).fetchone()
+
+    is_admin = (
+        current_user is not None
+        and current_user["is_admin"]
+    )
+
     if (
         report["user_id"] != session["user_id"]
-        and not (
-            db.execute(
-                """
-                SELECT is_admin
-                FROM users
-                WHERE id = ?
-                """,
-                (session["user_id"],)
-            ).fetchone()["is_admin"]
-        )
+        and not is_admin
     ):
 
         flash(
@@ -2375,6 +2656,15 @@ init_db()
 
 if __name__ == "__main__":
 
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
+
     app.run(
-        debug=True
+        host="0.0.0.0",
+        port=port,
+        debug=False
     )
