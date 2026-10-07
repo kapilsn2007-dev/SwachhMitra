@@ -1914,65 +1914,6 @@ def report_waste():
 
     return render_template(
         "report.html"
-    )        # =================================================
-        # REPORT CODE
-        # =================================================
-
-        report_code = (
-            "SM-"
-            + datetime.now().strftime(
-                "%Y%m%d"
-            )
-            + "-"
-            + uuid4().hex[:6].upper()
-        )
-
-        db = get_db()
-
-        db.execute(
-            """
-            INSERT INTO reports (
-                report_code,
-                user_id,
-                waste_type,
-                description,
-                image_filename,
-                address,
-                latitude,
-                longitude,
-                status,
-                anonymous
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                report_code,
-                session["user_id"],
-                waste_type,
-                description,
-                image_filename,
-                address,
-                latitude,
-                longitude,
-                "Reported",
-                anonymous
-            )
-        )
-
-        db.commit()
-
-        flash(
-            f"Report submitted successfully. "
-            f"Report ID: {report_code}",
-            "success"
-        )
-
-        return redirect(
-            url_for("user_dashboard")
-        )
-
-    return render_template(
-        "report.html"
     )
 
 
