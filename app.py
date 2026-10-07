@@ -1633,6 +1633,9 @@ def profile():
 # =========================================================
 # REPORT WASTE
 # =========================================================
+# =========================================================
+# REPORT WASTE
+# =========================================================
 
 @app.route(
     "/report",
@@ -1643,15 +1646,18 @@ def report_waste():
 
     if request.method == "POST":
 
-        waste_type = request.form.get(
-            "waste_type",
-            ""
-        ).strip()
+        # =====================================================
+        # DESCRIPTION
+        # =====================================================
 
         description = request.form.get(
             "description",
             ""
         ).strip()
+
+        # =====================================================
+        # LOCATION
+        # =====================================================
 
         address = request.form.get(
             "address",
@@ -1668,90 +1674,247 @@ def report_waste():
             ""
         ).strip()
 
-        anonymous = 1 if request.form.get(
-            "anonymous"
-        ) else 0
+        # =====================================================
+        # ANONYMOUS
+        # =====================================================
 
-        image_filename = ""
-
-        image = request.files.get(
-            "image"
+        anonymous = (
+            1
+            if request.form.get("anonymous")
+            else 0
         )
 
-        # =================================================
+        # =====================================================
         # IMAGE
-        # =================================================
+        # =====================================================
 
-        if image and image.filename:
+        image = request.files.get("image")
 
-            extension = (
-                image.filename
-                .rsplit(".", 1)[-1]
-                .lower()
+        if not image or not image.filename:
+
+            flash(
+                "Please upload a waste image.",
+                "danger"
             )
 
-            if extension not in ALLOWED_EXTENSIONS:
+            return render_template(
+                "report.html"
+            )
 
-                flash(
-                    "Invalid image format.",
-                    "danger"
+        # =====================================================
+        # CHECK FILE EXTENSION
+        # =====================================================
+
+        extension = (
+            image.filename
+            .rsplit(".", 1)[-1]
+            .lower()
+        )
+
+        if extension not in ALLOWED_EXTENSIONS:
+
+            flash(
+                "Invalid image format. "
+                "Please upload JPG, JPEG, PNG or WEBP.",
+                "danger"
+            )
+
+            return render_template(
+                "report.html"
+            )
+
+        # =====================================================
+        # SAVE IMAGE
+        # =====================================================
+
+        image_filename = secure_filename(
+            f"{uuid4().hex}.{extension}"
+        )
+
+        image_path = (
+            UPLOAD_FOLDER
+            / image_filename
+        )
+
+        try:
+
+            image.save(image_path)
+
+        except Exception:
+
+            flash(
+                "Unable to save the uploaded image.",
+                "danger"
+            )
+
+            return render_template(
+                "report.html"
+            )
+
+        # =====================================================
+        # AI CLASSIFICATION
+        # =====================================================
+
+        waste_type = ""
+
+        if classifier is None:
+
+            # AI is unavailable, for example on Render
+            # where the heavy model is intentionally disabled.
+
+            flash(
+                "AI waste detection is currently unavailable. "
+                "Please run the project locally where the AI model is enabled.",
+                "danger"
+            )
+
+            try:
+                image_path.unlink(
+                    missing_ok=True
                 )
+            except Exception:
+                pass
 
-                return render_template(
-                    "report.html"
-                )
-
-            image_filename = secure_filename(
-                f"{uuid4().hex}.{extension}"
+            return render_template(
+                "report.html"
             )
 
-            image_path = (
-                UPLOAD_FOLDER
-                / image_filename
-            )
+        try:
 
-            image.save(
+            # Open image using PIL
+            pil_image = Image.open(
                 image_path
+            ).convert("RGB")
+
+            # Send image to Hugging Face classifier
+            predictions = classifier(
+                pil_image
             )
 
-            # =============================================
-            # AI CLASSIFICATION
-            # =============================================
+            if not predictions:
 
-            if classifier is not None:
+                raise ValueError(
+                    "AI returned no predictions."
+                )
 
-                try:
+            # Highest-confidence prediction
+            top_prediction = predictions[0]
 
-                    pil_image = Image.open(
-                        image_path
-                    ).convert("RGB")
+            top_label = str(
+                top_prediction.get(
+                    "label",
+                    ""
+                )
+            ).strip().lower()
 
-                    predictions = classifier(
-                        pil_image
-                    )
+            # Convert model label into our project category
+            waste_type = WASTE_MAP.get(
+                top_label
+            )
 
-                    if predictions:
+            if not waste_type:
 
-                        top_label = (
-                            predictions[0]["label"]
-                            .lower()
-                        )
+                raise ValueError(
+                    f"Unsupported AI label: {top_label}"
+                )
 
-                        detected_type = WASTE_MAP.get(
-                            top_label
-                        )
+        except Exception as error:
 
-                        if detected_type:
+            print(
+                "AI classification error:",
+                error
+            )
 
-                            waste_type = (
-                                detected_type
-                            )
+            flash(
+                "The AI could not identify this waste image. "
+                "Please upload a clearer waste photo.",
+                "danger"
+            )
 
-                except Exception:
+            try:
+                image_path.unlink(
+                    missing_ok=True
+                )
+            except Exception:
+                pass
 
-                    pass
+            return render_template(
+                "report.html"
+            )
 
-        # =================================================
+        # =====================================================
+        # REPORT CODE
+        # =====================================================
+
+        report_code = (
+            "SM-"
+            + datetime.now().strftime(
+                "%Y%m%d"
+            )
+            + "-"
+            + uuid4().hex[:6].upper()
+        )
+
+        # =====================================================
+        # SAVE REPORT
+        # =====================================================
+
+        db = get_db()
+
+        db.execute(
+            """
+            INSERT INTO reports (
+                report_code,
+                user_id,
+                waste_type,
+                description,
+                image_filename,
+                address,
+                latitude,
+                longitude,
+                status,
+                anonymous
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                report_code,
+                session["user_id"],
+                waste_type,
+                description,
+                image_filename,
+                address,
+                latitude,
+                longitude,
+                "Reported",
+                anonymous
+            )
+        )
+
+        db.commit()
+
+        # =====================================================
+        # SUCCESS
+        # =====================================================
+
+        flash(
+            f"Report submitted successfully! "
+            f"AI detected: {waste_type}. "
+            f"Report ID: {report_code}",
+            "success"
+        )
+
+        return redirect(
+            url_for("user_dashboard")
+        )
+
+    # =========================================================
+    # GET
+    # =========================================================
+
+    return render_template(
+        "report.html"
+    )        # =================================================
         # REPORT CODE
         # =================================================
 
