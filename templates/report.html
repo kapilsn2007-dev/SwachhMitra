@@ -1,242 +1,859 @@
 {% extends "base.html" %}
 
-{% block title %}{{ t.report_garbage }} | SwachhMitra{% endblock %}
+{% block title %}{{ t.report_garbage }} - {{ t.SwachhMitra }}{% endblock %}
 
 {% block content %}
 
-<div class="row justify-content-center">
+<div class="container py-4">
 
-<div class="col-md-9 col-lg-7">
+    <div class="row justify-content-center">
+        <div class="col-lg-9">
 
-    <div class="card shadow-sm">
+            <div class="card shadow-lg border-0">
+                <div class="card-body p-4">
 
-        <div class="card-body p-4">
+                    <!-- PAGE HEADING -->
+                    <h2 class="fw-bold mb-2">
+                        🗑️ {{ t.report_garbage }}
+                    </h2>
 
-            <h2 class="text-success mb-2">
-                {{ t.report_garbage }}
-            </h2>
-
-            <p class="text-muted mb-4">
-                {{ t.report_garbage_help }}
-            </p>
-
-
-            <form method="post" enctype="multipart/form-data">
+                    <p class="text-muted mb-4">
+                        {{ t.report_garbage_help }}
+                    </p>
 
 
-                <!-- WASTE TYPE -->
+                    <form method="POST"
+                          action="{{ url_for('report_waste') }}"
+                          enctype="multipart/form-data">
 
-                <div class="mb-3">
 
-                    <label for="waste_type" class="form-label">
-                        {{ t.waste_type }}
-                    </label>
+                        <!-- ============================= -->
+                        <!-- WASTE TYPE -->
+                        <!-- ============================= -->
 
-                    <select
-                        class="form-select"
-                        id="waste_type"
-                        name="waste_type"
-                    >
+                        <div class="mb-3">
 
-                        <option value="">
-                            {{ t.select_waste_type }}
-                        </option>
+                            <label class="form-label fw-bold">
+                                {{ t.waste_type }}
+                            </label>
 
-                        <option value="Dry Waste">
-                            {{ t.dry_waste }}
-                        </option>
+                            <select name="waste_type"
+                                    class="form-select"
+                                    required>
 
-                        <option value="Wet Waste">
-                            {{ t.wet_waste }}
-                        </option>
+                                <option value="">
+                                    {{ t.select_waste_type }}
+                                </option>
 
-                        <option value="Plastic Waste">
-                            {{ t.plastic_waste }}
-                        </option>
+                                <option value="Dry Waste">
+                                    {{ t.dry_waste }}
+                                </option>
 
-                        <option value="E-Waste">
-                            {{ t.e_waste }}
-                        </option>
+                                <option value="Wet Waste">
+                                    {{ t.wet_waste }}
+                                </option>
 
-                        <option value="Construction Waste">
-                            {{ t.construction }}
-                        </option>
+                                <option value="Plastic Waste">
+                                    {{ t.plastic_waste }}
+                                </option>
 
-                        <option value="Medical Waste">
-                            {{ t.medical }}
-                        </option>
+                                <option value="E-Waste">
+                                    {{ t.e_waste }}
+                                </option>
 
-                        <option value="Mixed Waste">
-                            {{ t.mixed_waste }}
-                        </option>
+                                <option value="Construction Waste">
+                                    {{ t.construction }}
+                                </option>
 
-                        <option value="Other">
-                            {{ t.other }}
-                        </option>
+                                <option value="Medical Waste">
+                                    {{ t.medical }}
+                                </option>
 
-                    </select>
+                                <option value="Mixed Waste">
+                                    {{ t.mixed_waste }}
+                                </option>
+
+                                <option value="Other">
+                                    {{ t.other }}
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- IMAGE -->
+                        <!-- ============================= -->
+
+                        <div class="mb-3">
+
+                            <label class="form-label fw-bold">
+                                {{ t.garbage_image }}
+                            </label>
+
+                            <input type="file"
+                                   name="image"
+                                   class="form-control"
+                                   accept=".jpg,.jpeg,.png,.webp"
+                                   required>
+
+                            <div class="form-text">
+                                {{ t.ai_detection_note }}
+                                {{ t.upload_clear_photo }}
+                                {{ t.maximum_size }}
+                            </div>
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- DESCRIPTION -->
+                        <!-- ============================= -->
+
+                        <div class="mb-3">
+
+                            <label class="form-label fw-bold">
+                                {{ t.description }}
+                            </label>
+
+                            <textarea name="description"
+                                      class="form-control"
+                                      rows="4"
+                                      placeholder="{{ t.description_placeholder }}"></textarea>
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- LOCATION -->
+                        <!-- ============================= -->
+
+                        <div class="mb-3">
+
+                            <label class="form-label fw-bold">
+                                📍 {{ t.location_locality }}
+                            </label>
+
+                            <input type="text"
+                                   name="address"
+                                   id="address"
+                                   class="form-control"
+                                   placeholder="{{ t.location_example }}">
+
+                            <div class="form-text">
+                                The address will be detected automatically
+                                when you select a location on the map.
+                            </div>
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- MAP HEADER -->
+                        <!-- ============================= -->
+
+                        <div class="mb-2">
+
+                            <div class="d-flex justify-content-between
+                                        align-items-center flex-wrap gap-2">
+
+                                <label class="form-label fw-bold mb-0">
+                                    🗺️ Select Garbage Location
+                                </label>
+
+                                <button type="button"
+                                        class="btn btn-sm btn-success"
+                                        id="locateBtn">
+
+                                    📍 Use My Current Location
+
+                                </button>
+
+                            </div>
+
+                        </div>
+
+
+                        <p class="text-muted small mb-2">
+
+                            Click on the map exactly where the garbage is located.
+                            You can drag the marker to adjust the location.
+
+                        </p>
+
+
+                        <!-- ============================= -->
+                        <!-- MAP -->
+                        <!-- ============================= -->
+
+                        <div id="reportMap"
+                             style="
+                                width: 100%;
+                                height: 420px;
+                                border-radius: 14px;
+                                border: 2px solid #ddd;
+                                overflow: hidden;
+                                margin-bottom: 15px;
+                             ">
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- LOCATION STATUS -->
+                        <!-- ============================= -->
+
+                        <div id="locationStatus"
+                             class="alert alert-info small">
+
+                            📍 Please click on the map to select
+                            the garbage location.
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- COORDINATES -->
+                        <!-- ============================= -->
+
+                        <div class="row mb-3">
+
+                            <div class="col-md-6 mb-3 mb-md-0">
+
+                                <label class="form-label fw-bold">
+                                    {{ t.latitude }}
+                                </label>
+
+                                <input type="text"
+                                       name="latitude"
+                                       id="latitude"
+                                       class="form-control"
+                                       placeholder="Select location on map"
+                                       readonly>
+
+                            </div>
+
+
+                            <div class="col-md-6">
+
+                                <label class="form-label fw-bold">
+                                    {{ t.longitude }}
+                                </label>
+
+                                <input type="text"
+                                       name="longitude"
+                                       id="longitude"
+                                       class="form-control"
+                                       placeholder="Select location on map"
+                                       readonly>
+
+                            </div>
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- ANONYMOUS -->
+                        <!-- ============================= -->
+
+                        <div class="form-check mb-4">
+
+                            <input class="form-check-input"
+                                   type="checkbox"
+                                   name="anonymous"
+                                   id="anonymous">
+
+                            <label class="form-check-label"
+                                   for="anonymous">
+
+                                {{ t.anonymous_report }}
+
+                            </label>
+
+                        </div>
+
+
+                        <!-- ============================= -->
+                        <!-- BUTTONS -->
+                        <!-- ============================= -->
+
+                        <div class="d-flex gap-2 flex-wrap">
+
+                            <button type="submit"
+                                    class="btn btn-success px-4"
+                                    id="submitBtn">
+
+                                🚨 {{ t.submit_garbage_report }}
+
+                            </button>
+
+
+                            <a href="{{ url_for('user_dashboard') }}"
+                               class="btn btn-secondary px-4">
+
+                                {{ t.back_to_dashboard }}
+
+                            </a>
+
+                        </div>
+
+                    </form>
 
                 </div>
-
-
-                <!-- IMAGE -->
-
-                <div class="mb-3">
-
-                    <label for="image" class="form-label">
-                        {{ t.garbage_image }}
-                    </label>
-
-                    <div class="form-text mb-2">
-                        {{ t.ai_detection_note }}
-                    </div>
-
-                    <input
-                        type="file"
-                        class="form-control"
-                        id="image"
-                        name="image"
-                        accept=".jpg,.jpeg,.png,.webp"
-                    >
-
-                    <div class="form-text">
-                        {{ t.upload_clear_photo }}
-                        {{ t.maximum_size }}
-                    </div>
-
-                </div>
-
-
-                <!-- DESCRIPTION -->
-
-                <div class="mb-3">
-
-                    <label for="description" class="form-label">
-                        {{ t.description }}
-                    </label>
-
-                    <textarea
-                        class="form-control"
-                        id="description"
-                        name="description"
-                        rows="4"
-                        placeholder="{{ t.description_placeholder }}"
-                    ></textarea>
-
-                </div>
-
-
-                <!-- ADDRESS -->
-
-                <div class="mb-3">
-
-                    <label for="address" class="form-label">
-                        {{ t.location_locality }}
-                    </label>
-
-                    <input
-                        type="text"
-                        class="form-control"
-                        id="address"
-                        name="address"
-                        placeholder="{{ t.location_example }}"
-                    >
-
-                </div>
-
-
-                <!-- COORDINATES -->
-
-                <div class="row">
-
-                    <div class="col-md-6 mb-3">
-
-                        <label for="latitude" class="form-label">
-                            {{ t.latitude }}
-                        </label>
-
-                        <input
-                            type="text"
-                            class="form-control"
-                            id="latitude"
-                            name="latitude"
-                            placeholder="{{ t.optional }}"
-                        >
-
-                    </div>
-
-
-                    <div class="col-md-6 mb-3">
-
-                        <label for="longitude" class="form-label">
-                            {{ t.longitude }}
-                        </label>
-
-                        <input
-                            type="text"
-                            class="form-control"
-                            id="longitude"
-                            name="longitude"
-                            placeholder="{{ t.optional }}"
-                        >
-
-                    </div>
-
-                </div>
-
-
-                <!-- ANONYMOUS -->
-
-                <div class="form-check mb-4">
-
-                    <input
-                        class="form-check-input"
-                        type="checkbox"
-                        id="anonymous"
-                        name="anonymous"
-                    >
-
-                    <label
-                        class="form-check-label"
-                        for="anonymous"
-                    >
-                        {{ t.anonymous_report }}
-                    </label>
-
-                </div>
-
-
-                <!-- SUBMIT -->
-
-                <button
-                    type="submit"
-                    class="btn btn-success w-100"
-                >
-                    {{ t.submit_garbage_report }}
-                </button>
-
-            </form>
-
-
-            <!-- BACK -->
-
-            <div class="mt-3 text-center">
-
-                <a
-                    href="{{ url_for('user_dashboard') }}"
-                    class="text-success"
-                >
-                    {{ t.back_to_dashboard }}
-                </a>
-
             </div>
 
         </div>
-
     </div>
 
 </div>
 
-</div>
+
+<!-- ====================================================== -->
+<!-- LEAFLET -->
+<!-- ====================================================== -->
+
+<link rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin="">
+
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        crossorigin=""></script>
+
+
+<script>
+
+document.addEventListener("DOMContentLoaded", function () {
+
+
+    /* =====================================================
+       DEFAULT MAP LOCATION
+       Pimpri, Maharashtra
+       ===================================================== */
+
+    const defaultLatitude = 18.6298;
+    const defaultLongitude = 73.7997;
+
+
+    /* =====================================================
+       CREATE MAP
+       ===================================================== */
+
+    const map = L.map("reportMap").setView(
+        [defaultLatitude, defaultLongitude],
+        14
+    );
+
+
+    /* =====================================================
+       OPEN STREET MAP
+       ===================================================== */
+
+    L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap contributors"
+        }
+    ).addTo(map);
+
+
+    /* =====================================================
+       VARIABLES
+       ===================================================== */
+
+    let marker = null;
+
+    let reverseGeocodeTimer = null;
+
+
+    const latitudeInput =
+        document.getElementById("latitude");
+
+    const longitudeInput =
+        document.getElementById("longitude");
+
+    const addressInput =
+        document.getElementById("address");
+
+    const locationStatus =
+        document.getElementById("locationStatus");
+
+    const locateBtn =
+        document.getElementById("locateBtn");
+
+
+    /* =====================================================
+       UPDATE STATUS
+       ===================================================== */
+
+    function showStatus(message, type) {
+
+        locationStatus.className =
+            "alert alert-" + type + " small";
+
+        locationStatus.innerHTML =
+            message;
+
+    }
+
+
+    /* =====================================================
+       REVERSE GEOCODING
+       
+       Coordinates → Human-readable address
+       
+       Uses OpenStreetMap Nominatim.
+       ===================================================== */
+
+    async function getAddressFromCoordinates(
+        latitude,
+        longitude
+    ) {
+
+        showStatus(
+            "🔄 Detecting address...",
+            "info"
+        );
+
+
+        try {
+
+            const url =
+                "https://nominatim.openstreetmap.org/reverse" +
+                "?format=jsonv2" +
+                "&lat=" +
+                encodeURIComponent(latitude) +
+                "&lon=" +
+                encodeURIComponent(longitude) +
+                "&zoom=18" +
+                "&addressdetails=1";
+
+
+            const response =
+                await fetch(url, {
+                    headers: {
+                        "Accept": "application/json"
+                    }
+                });
+
+
+            if (!response.ok) {
+                throw new Error(
+                    "Address lookup failed"
+                );
+            }
+
+
+            const data =
+                await response.json();
+
+
+            if (data && data.display_name) {
+
+                addressInput.value =
+                    data.display_name;
+
+
+                showStatus(
+                    "✅ Location selected and address detected.",
+                    "success"
+                );
+
+            } else {
+
+                showStatus(
+                    "⚠️ Location selected, but address could not be detected. You can enter it manually.",
+                    "warning"
+                );
+
+            }
+
+        }
+
+        catch (error) {
+
+            console.error(
+                "Reverse geocoding error:",
+                error
+            );
+
+
+            showStatus(
+                "⚠️ Location selected. Address detection failed, so please enter the locality manually.",
+                "warning"
+            );
+
+        }
+
+    }
+
+
+    /* =====================================================
+       UPDATE MARKER COORDINATES
+       ===================================================== */
+
+    function updateCoordinates(
+        latitude,
+        longitude,
+        getAddress = true
+    ) {
+
+        latitude =
+            Number(latitude);
+
+        longitude =
+            Number(longitude);
+
+
+        latitudeInput.value =
+            latitude.toFixed(6);
+
+        longitudeInput.value =
+            longitude.toFixed(6);
+
+
+        if (getAddress) {
+
+            clearTimeout(
+                reverseGeocodeTimer
+            );
+
+
+            reverseGeocodeTimer =
+                setTimeout(
+                    function () {
+
+                        getAddressFromCoordinates(
+                            latitude,
+                            longitude
+                        );
+
+                    },
+                    500
+                );
+
+        }
+
+    }
+
+
+    /* =====================================================
+       PLACE MARKER
+       ===================================================== */
+
+    function placeMarker(
+        latitude,
+        longitude
+    ) {
+
+        latitude =
+            Number(latitude);
+
+        longitude =
+            Number(longitude);
+
+
+        /* Remove old marker */
+
+        if (marker !== null) {
+
+            map.removeLayer(
+                marker
+            );
+
+        }
+
+
+        /* Create draggable marker */
+
+        marker =
+            L.marker(
+                [latitude, longitude],
+                {
+                    draggable: true
+                }
+            ).addTo(map);
+
+
+        /* Popup */
+
+        marker.bindPopup(
+            "<b>🗑️ Garbage Location</b><br>" +
+            "Drag this marker to adjust the location."
+        ).openPopup();
+
+
+        /* Update coordinates */
+
+        updateCoordinates(
+            latitude,
+            longitude,
+            true
+        );
+
+
+        /* Center map */
+
+        map.setView(
+            [latitude, longitude],
+            17
+        );
+
+
+        /* Marker dragged */
+
+        marker.on(
+            "dragend",
+            function (event) {
+
+                const position =
+                    event.target.getLatLng();
+
+
+                updateCoordinates(
+                    position.lat,
+                    position.lng,
+                    true
+                );
+
+            }
+        );
+
+    }
+
+
+    /* =====================================================
+       CLICK ON MAP
+       ===================================================== */
+
+    map.on(
+        "click",
+        function (event) {
+
+            const latitude =
+                event.latlng.lat;
+
+            const longitude =
+                event.latlng.lng;
+
+
+            placeMarker(
+                latitude,
+                longitude
+            );
+
+        }
+    );
+
+
+    /* =====================================================
+       USE CURRENT LOCATION
+       ===================================================== */
+
+    locateBtn.addEventListener(
+        "click",
+        function () {
+
+
+            if (!navigator.geolocation) {
+
+                showStatus(
+                    "❌ Your browser does not support location services.",
+                    "danger"
+                );
+
+                return;
+
+            }
+
+
+            locateBtn.disabled =
+                true;
+
+
+            locateBtn.innerHTML =
+                "⏳ Finding location...";
+
+
+            showStatus(
+                "📍 Getting your current location...",
+                "info"
+            );
+
+
+            navigator.geolocation.getCurrentPosition(
+
+                function (position) {
+
+                    const latitude =
+                        position.coords.latitude;
+
+                    const longitude =
+                        position.coords.longitude;
+
+
+                    placeMarker(
+                        latitude,
+                        longitude
+                    );
+
+
+                    locateBtn.disabled =
+                        false;
+
+
+                    locateBtn.innerHTML =
+                        "📍 Use My Current Location";
+
+                },
+
+
+                function (error) {
+
+                    console.error(
+                        "Geolocation error:",
+                        error
+                    );
+
+
+                    locateBtn.disabled =
+                        false;
+
+
+                    locateBtn.innerHTML =
+                        "📍 Use My Current Location";
+
+
+                    if (error.code === 1) {
+
+                        showStatus(
+                            "⚠️ Location permission was denied. Please allow location access or select the location manually on the map.",
+                            "warning"
+                        );
+
+                    }
+
+                    else if (error.code === 2) {
+
+                        showStatus(
+                            "⚠️ Your location could not be determined. Please select the location manually on the map.",
+                            "warning"
+                        );
+
+                    }
+
+                    else if (error.code === 3) {
+
+                        showStatus(
+                            "⚠️ Location request timed out. Please select the location manually on the map.",
+                            "warning"
+                        );
+
+                    }
+
+                    else {
+
+                        showStatus(
+                            "⚠️ Could not detect your location. Please select it manually on the map.",
+                            "warning"
+                        );
+
+                    }
+
+                },
+
+
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+
+            );
+
+        }
+    );
+
+
+    /* =====================================================
+       FORM VALIDATION
+       ===================================================== */
+
+    document
+        .querySelector("form")
+        .addEventListener(
+            "submit",
+            function (event) {
+
+
+                if (
+                    !latitudeInput.value ||
+                    !longitudeInput.value
+                ) {
+
+                    event.preventDefault();
+
+
+                    showStatus(
+                        "❌ Please select the exact garbage location on the map before submitting the report.",
+                        "danger"
+                    );
+
+
+                    document
+                        .getElementById("reportMap")
+                        .scrollIntoView({
+                            behavior: "smooth",
+                            block: "center"
+                        });
+
+
+                    return false;
+
+                }
+
+
+                /*
+                 * If address is empty, coordinates are
+                 * still valid. Backend will receive them.
+                 */
+
+                return true;
+
+            }
+        );
+
+
+    /* =====================================================
+       FIX LEAFLET SIZE
+       ===================================================== */
+
+    setTimeout(
+        function () {
+
+            map.invalidateSize();
+
+        },
+        300
+    );
+
+
+    /* =====================================================
+       HANDLE WINDOW RESIZE
+       ===================================================== */
+
+    window.addEventListener(
+        "resize",
+        function () {
+
+            map.invalidateSize();
+
+        }
+    );
+
+});
+
+</script>
 
 {% endblock %}
