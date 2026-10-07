@@ -12,7 +12,6 @@
             <div class="card shadow-lg border-0">
                 <div class="card-body p-4">
 
-                    <!-- PAGE HEADING -->
                     <h2 class="fw-bold mb-2">
                         🗑️ {{ t.report_garbage }}
                     </h2>
@@ -21,16 +20,15 @@
                         {{ t.report_garbage_help }}
                     </p>
 
-
+                    <!-- IMPORTANT: novalidate prevents browser from blocking submit -->
                     <form method="POST"
                           action="{{ url_for('report_waste') }}"
-                          enctype="multipart/form-data">
+                          enctype="multipart/form-data"
+                          id="reportForm"
+                          novalidate>
 
 
-                        <!-- ============================= -->
                         <!-- WASTE TYPE -->
-                        <!-- ============================= -->
-
                         <div class="mb-3">
 
                             <label class="form-label fw-bold">
@@ -38,8 +36,8 @@
                             </label>
 
                             <select name="waste_type"
-                                    class="form-select"
-                                    required>
+                                    id="wasteType"
+                                    class="form-select">
 
                                 <option value="">
                                     {{ t.select_waste_type }}
@@ -82,10 +80,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- IMAGE -->
-                        <!-- ============================= -->
-
                         <div class="mb-3">
 
                             <label class="form-label fw-bold">
@@ -94,9 +89,9 @@
 
                             <input type="file"
                                    name="image"
+                                   id="image"
                                    class="form-control"
-                                   accept=".jpg,.jpeg,.png,.webp"
-                                   required>
+                                   accept=".jpg,.jpeg,.png,.webp">
 
                             <div class="form-text">
                                 {{ t.ai_detection_note }}
@@ -107,10 +102,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- DESCRIPTION -->
-                        <!-- ============================= -->
-
                         <div class="mb-3">
 
                             <label class="form-label fw-bold">
@@ -125,10 +117,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
-                        <!-- LOCATION -->
-                        <!-- ============================= -->
-
+                        <!-- ADDRESS -->
                         <div class="mb-3">
 
                             <label class="form-label fw-bold">
@@ -143,16 +132,13 @@
 
                             <div class="form-text">
                                 The address will be detected automatically
-                                when you select a location on the map.
+                                after selecting a location on the map.
                             </div>
 
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- MAP HEADER -->
-                        <!-- ============================= -->
-
                         <div class="mb-2">
 
                             <div class="d-flex justify-content-between
@@ -176,17 +162,12 @@
 
 
                         <p class="text-muted small mb-2">
-
-                            Click on the map exactly where the garbage is located.
+                            Click exactly where the garbage is located.
                             You can drag the marker to adjust the location.
-
                         </p>
 
 
-                        <!-- ============================= -->
                         <!-- MAP -->
-                        <!-- ============================= -->
-
                         <div id="reportMap"
                              style="
                                 width: 100%;
@@ -199,10 +180,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- LOCATION STATUS -->
-                        <!-- ============================= -->
-
                         <div id="locationStatus"
                              class="alert alert-info small">
 
@@ -212,10 +190,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- COORDINATES -->
-                        <!-- ============================= -->
-
                         <div class="row mb-3">
 
                             <div class="col-md-6 mb-3 mb-md-0">
@@ -252,10 +227,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- ANONYMOUS -->
-                        <!-- ============================= -->
-
                         <div class="form-check mb-4">
 
                             <input class="form-check-input"
@@ -273,10 +245,7 @@
                         </div>
 
 
-                        <!-- ============================= -->
                         <!-- BUTTONS -->
-                        <!-- ============================= -->
-
                         <div class="d-flex gap-2 flex-wrap">
 
                             <button type="submit"
@@ -286,7 +255,6 @@
                                 🚨 {{ t.submit_garbage_report }}
 
                             </button>
-
 
                             <a href="{{ url_for('user_dashboard') }}"
                                class="btn btn-secondary px-4">
@@ -308,15 +276,13 @@
 </div>
 
 
-<!-- ====================================================== -->
-<!-- LEAFLET -->
-<!-- ====================================================== -->
-
+<!-- LEAFLET CSS -->
 <link rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       crossorigin="">
 
 
+<!-- LEAFLET JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         crossorigin=""></script>
 
@@ -325,19 +291,17 @@
 
 document.addEventListener("DOMContentLoaded", function () {
 
-
-    /* =====================================================
-       DEFAULT MAP LOCATION
-       Pimpri, Maharashtra
-       ===================================================== */
+    /* ==========================================
+       DEFAULT LOCATION - PIMPRI
+       ========================================== */
 
     const defaultLatitude = 18.6298;
     const defaultLongitude = 73.7997;
 
 
-    /* =====================================================
+    /* ==========================================
        CREATE MAP
-       ===================================================== */
+       ========================================== */
 
     const map = L.map("reportMap").setView(
         [defaultLatitude, defaultLongitude],
@@ -345,9 +309,9 @@ document.addEventListener("DOMContentLoaded", function () {
     );
 
 
-    /* =====================================================
-       OPEN STREET MAP
-       ===================================================== */
+    /* ==========================================
+       OPENSTREETMAP
+       ========================================== */
 
     L.tileLayer(
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -358,14 +322,23 @@ document.addEventListener("DOMContentLoaded", function () {
     ).addTo(map);
 
 
-    /* =====================================================
+    /* ==========================================
        VARIABLES
-       ===================================================== */
+       ========================================== */
 
     let marker = null;
 
     let reverseGeocodeTimer = null;
 
+
+    const form =
+        document.getElementById("reportForm");
+
+    const wasteType =
+        document.getElementById("wasteType");
+
+    const image =
+        document.getElementById("image");
 
     const latitudeInput =
         document.getElementById("latitude");
@@ -382,10 +355,13 @@ document.addEventListener("DOMContentLoaded", function () {
     const locateBtn =
         document.getElementById("locateBtn");
 
+    const submitBtn =
+        document.getElementById("submitBtn");
 
-    /* =====================================================
-       UPDATE STATUS
-       ===================================================== */
+
+    /* ==========================================
+       STATUS MESSAGE
+       ========================================== */
 
     function showStatus(message, type) {
 
@@ -398,13 +374,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
 
-    /* =====================================================
+    /* ==========================================
        REVERSE GEOCODING
-       
-       Coordinates → Human-readable address
-       
-       Uses OpenStreetMap Nominatim.
-       ===================================================== */
+       ========================================== */
 
     async function getAddressFromCoordinates(
         latitude,
@@ -415,7 +387,6 @@ document.addEventListener("DOMContentLoaded", function () {
             "🔄 Detecting address...",
             "info"
         );
-
 
         try {
 
@@ -431,17 +402,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
 
             const response =
-                await fetch(url, {
-                    headers: {
-                        "Accept": "application/json"
-                    }
-                });
+                await fetch(url);
 
 
             if (!response.ok) {
-                throw new Error(
-                    "Address lookup failed"
-                );
+                throw new Error("Address lookup failed");
             }
 
 
@@ -463,15 +428,13 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
 
                 showStatus(
-                    "⚠️ Location selected, but address could not be detected. You can enter it manually.",
+                    "⚠️ Location selected. Please enter the address manually.",
                     "warning"
                 );
 
             }
 
-        }
-
-        catch (error) {
+        } catch (error) {
 
             console.error(
                 "Reverse geocoding error:",
@@ -480,7 +443,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
 
             showStatus(
-                "⚠️ Location selected. Address detection failed, so please enter the locality manually.",
+                "⚠️ Location selected, but address detection failed. You can enter it manually.",
                 "warning"
             );
 
@@ -489,58 +452,43 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
 
-    /* =====================================================
-       UPDATE MARKER COORDINATES
-       ===================================================== */
+    /* ==========================================
+       UPDATE COORDINATES
+       ========================================== */
 
     function updateCoordinates(
         latitude,
-        longitude,
-        getAddress = true
+        longitude
     ) {
 
-        latitude =
-            Number(latitude);
-
-        longitude =
-            Number(longitude);
-
-
         latitudeInput.value =
-            latitude.toFixed(6);
+            Number(latitude).toFixed(6);
 
         longitudeInput.value =
-            longitude.toFixed(6);
+            Number(longitude).toFixed(6);
 
 
-        if (getAddress) {
-
-            clearTimeout(
-                reverseGeocodeTimer
-            );
+        clearTimeout(
+            reverseGeocodeTimer
+        );
 
 
-            reverseGeocodeTimer =
-                setTimeout(
-                    function () {
+        reverseGeocodeTimer =
+            setTimeout(function () {
 
-                        getAddressFromCoordinates(
-                            latitude,
-                            longitude
-                        );
-
-                    },
-                    500
+                getAddressFromCoordinates(
+                    latitude,
+                    longitude
                 );
 
-        }
+            }, 500);
 
     }
 
 
-    /* =====================================================
+    /* ==========================================
        PLACE MARKER
-       ===================================================== */
+       ========================================== */
 
     function placeMarker(
         latitude,
@@ -558,9 +506,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
         if (marker !== null) {
 
-            map.removeLayer(
-                marker
-            );
+            map.removeLayer(marker);
 
         }
 
@@ -580,16 +526,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
         marker.bindPopup(
             "<b>🗑️ Garbage Location</b><br>" +
-            "Drag this marker to adjust the location."
+            "Drag this marker if necessary."
         ).openPopup();
 
 
-        /* Update coordinates */
+        /* Coordinates */
 
         updateCoordinates(
             latitude,
-            longitude,
-            true
+            longitude
         );
 
 
@@ -601,7 +546,7 @@ document.addEventListener("DOMContentLoaded", function () {
         );
 
 
-        /* Marker dragged */
+        /* Marker drag */
 
         marker.on(
             "dragend",
@@ -613,8 +558,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
                 updateCoordinates(
                     position.lat,
-                    position.lng,
-                    true
+                    position.lng
                 );
 
             }
@@ -623,38 +567,30 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
 
-    /* =====================================================
-       CLICK ON MAP
-       ===================================================== */
+    /* ==========================================
+       CLICK MAP
+       ========================================== */
 
     map.on(
         "click",
         function (event) {
 
-            const latitude =
-                event.latlng.lat;
-
-            const longitude =
-                event.latlng.lng;
-
-
             placeMarker(
-                latitude,
-                longitude
+                event.latlng.lat,
+                event.latlng.lng
             );
 
         }
     );
 
 
-    /* =====================================================
-       USE CURRENT LOCATION
-       ===================================================== */
+    /* ==========================================
+       CURRENT LOCATION
+       ========================================== */
 
     locateBtn.addEventListener(
         "click",
         function () {
-
 
             if (!navigator.geolocation) {
 
@@ -664,13 +600,10 @@ document.addEventListener("DOMContentLoaded", function () {
                 );
 
                 return;
-
             }
 
 
-            locateBtn.disabled =
-                true;
-
+            locateBtn.disabled = true;
 
             locateBtn.innerHTML =
                 "⏳ Finding location...";
@@ -686,16 +619,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
                 function (position) {
 
-                    const latitude =
-                        position.coords.latitude;
-
-                    const longitude =
-                        position.coords.longitude;
-
-
                     placeMarker(
-                        latitude,
-                        longitude
+                        position.coords.latitude,
+                        position.coords.longitude
                     );
 
 
@@ -712,7 +638,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 function (error) {
 
                     console.error(
-                        "Geolocation error:",
                         error
                     );
 
@@ -725,41 +650,10 @@ document.addEventListener("DOMContentLoaded", function () {
                         "📍 Use My Current Location";
 
 
-                    if (error.code === 1) {
-
-                        showStatus(
-                            "⚠️ Location permission was denied. Please allow location access or select the location manually on the map.",
-                            "warning"
-                        );
-
-                    }
-
-                    else if (error.code === 2) {
-
-                        showStatus(
-                            "⚠️ Your location could not be determined. Please select the location manually on the map.",
-                            "warning"
-                        );
-
-                    }
-
-                    else if (error.code === 3) {
-
-                        showStatus(
-                            "⚠️ Location request timed out. Please select the location manually on the map.",
-                            "warning"
-                        );
-
-                    }
-
-                    else {
-
-                        showStatus(
-                            "⚠️ Could not detect your location. Please select it manually on the map.",
-                            "warning"
-                        );
-
-                    }
+                    showStatus(
+                        "⚠️ Could not access your location. Please click the map manually.",
+                        "warning"
+                    );
 
                 },
 
@@ -776,58 +670,101 @@ document.addEventListener("DOMContentLoaded", function () {
     );
 
 
-    /* =====================================================
-       FORM VALIDATION
-       ===================================================== */
+    /* ==========================================
+       FORM SUBMISSION
+       ========================================== */
 
-    document
-        .querySelector("form")
-        .addEventListener(
-            "submit",
-            function (event) {
+    form.addEventListener(
+        "submit",
+        function (event) {
 
+            /*
+             * Waste type
+             */
 
-                if (
-                    !latitudeInput.value ||
-                    !longitudeInput.value
-                ) {
+            if (!wasteType.value) {
 
-                    event.preventDefault();
+                event.preventDefault();
 
+                alert(
+                    "Please select the waste type."
+                );
 
-                    showStatus(
-                        "❌ Please select the exact garbage location on the map before submitting the report.",
-                        "danger"
-                    );
+                wasteType.focus();
 
-
-                    document
-                        .getElementById("reportMap")
-                        .scrollIntoView({
-                            behavior: "smooth",
-                            block: "center"
-                        });
-
-
-                    return false;
-
-                }
-
-
-                /*
-                 * If address is empty, coordinates are
-                 * still valid. Backend will receive them.
-                 */
-
-                return true;
-
+                return;
             }
-        );
 
 
-    /* =====================================================
-       FIX LEAFLET SIZE
-       ===================================================== */
+            /*
+             * Image
+             */
+
+            if (!image.files ||
+                image.files.length === 0) {
+
+                event.preventDefault();
+
+                alert(
+                    "Please upload a garbage image."
+                );
+
+                image.focus();
+
+                return;
+            }
+
+
+            /*
+             * Location
+             */
+
+            if (
+                !latitudeInput.value ||
+                !longitudeInput.value
+            ) {
+
+                event.preventDefault();
+
+                showStatus(
+                    "❌ Please click on the map and select the exact garbage location.",
+                    "danger"
+                );
+
+                document
+                    .getElementById("reportMap")
+                    .scrollIntoView({
+                        behavior: "smooth",
+                        block: "center"
+                    });
+
+                return;
+            }
+
+
+            /*
+             * Everything is valid.
+             *
+             * IMPORTANT:
+             * Do NOT call preventDefault().
+             *
+             * The form will now be sent to:
+             *
+             * /report
+             */
+
+            submitBtn.disabled = true;
+
+            submitBtn.innerHTML =
+                "⏳ Submitting report...";
+
+        }
+    );
+
+
+    /* ==========================================
+       FIX MAP DISPLAY
+       ========================================== */
 
     setTimeout(
         function () {
@@ -835,13 +772,9 @@ document.addEventListener("DOMContentLoaded", function () {
             map.invalidateSize();
 
         },
-        300
+        500
     );
 
-
-    /* =====================================================
-       HANDLE WINDOW RESIZE
-       ===================================================== */
 
     window.addEventListener(
         "resize",
