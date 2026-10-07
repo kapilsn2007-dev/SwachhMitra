@@ -1770,72 +1770,26 @@ def report_waste():
         # =====================================================
         # AI CLASSIFICATION
         # =====================================================
-# =================================================
-# AI CLASSIFICATION
-# =================================================
+        # =====================================================
+        # AI CLASSIFICATION
+        # =====================================================
 
-waste_type = ""
+        waste_type = ""
 
-try:
+        try:
 
-    # Load the AI model only when an image is submitted
-    ai_classifier = get_classifier()
+            # Load the AI model only when an image is submitted
+            ai_classifier = get_classifier()
 
-    pil_image = Image.open(
-        image_path
-    ).convert("RGB")
+            pil_image = Image.open(
+                image_path
+            ).convert("RGB")
 
-    predictions = ai_classifier(
-        pil_image
-    )
-
-    if not predictions:
-        raise ValueError(
-            "AI returned no predictions."
-        )
-
-    top_label = str(
-        predictions[0].get(
-            "label",
-            ""
-        )
-    ).strip().lower()
-
-    waste_type = WASTE_MAP.get(
-        top_label
-    )
-
-    if not waste_type:
-        raise ValueError(
-            f"Unsupported AI label: {top_label}"
-        )
-
-except Exception as error:
-
-    print(
-        "AI classification error:",
-        error
-    )
-
-    flash(
-        "The AI could not identify this waste image. "
-        "Please upload a clearer waste photo.",
-        "danger"
-    )
-
-    try:
-        image_path.unlink(
-            missing_ok=True
-        )
-    except Exception:
-        pass
-
-    return render_template(
-        "report.html"
-    )
+            predictions = ai_classifier(
+                pil_image
+            )
 
             if not predictions:
-
                 raise ValueError(
                     "AI returned no predictions."
                 )
@@ -1885,6 +1839,18 @@ except Exception as error:
                 "report.html"
             )
 
+        # =====================================================
+        # REPORT CODE
+        # =====================================================
+
+        report_code = (
+            "SM-"
+            + datetime.now().strftime(
+                "%Y%m%d"
+            )
+            + "-"
+            + uuid4().hex[:6].upper()
+        )
         # =====================================================
         # REPORT CODE
         # =====================================================
