@@ -85,28 +85,20 @@ ADMIN_PASSWORD = "admin123"
 #
 # Locally the classifier can still be loaded.
 # =========================================================
+try:
+    from transformers import pipeline
 
-if os.environ.get("RENDER"):
+    classifier = pipeline(
+        "image-classification",
+        model="yangy50/garbage-classification",
+        device=-1
+    )
 
+    print("AI waste classifier loaded successfully.")
+
+except Exception as error:
     classifier = None
-
-else:
-
-    try:
-
-        from transformers import pipeline
-
-        classifier = pipeline(
-            "image-classification",
-            model="yangy50/garbage-classification"
-        )
-
-    except Exception:
-
-        classifier = None
-
-
-WASTE_MAP = {
+    print("AI classifier failed to load:", error)WASTE_MAP = {
     "plastic": "Plastic Waste",
     "paper": "Dry Waste",
     "cardboard": "Dry Waste",
