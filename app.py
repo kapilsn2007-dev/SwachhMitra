@@ -1770,42 +1770,69 @@ def report_waste():
         # =====================================================
         # AI CLASSIFICATION
         # =====================================================
+# =================================================
+# AI CLASSIFICATION
+# =================================================
 
-        waste_type = ""
+waste_type = ""
 
-        if classifier is None:
+try:
 
-            # AI is unavailable, for example on Render
-            # where the heavy model is intentionally disabled.
+    # Load the AI model only when an image is submitted
+    ai_classifier = get_classifier()
 
-            flash(
-                "AI waste detection is currently unavailable. "
-                "Please run the project locally where the AI model is enabled.",
-                "danger"
-            )
+    pil_image = Image.open(
+        image_path
+    ).convert("RGB")
 
-            try:
-                image_path.unlink(
-                    missing_ok=True
-                )
-            except Exception:
-                pass
+    predictions = ai_classifier(
+        pil_image
+    )
 
-            return render_template(
-                "report.html"
-            )
+    if not predictions:
+        raise ValueError(
+            "AI returned no predictions."
+        )
 
-        try:
+    top_label = str(
+        predictions[0].get(
+            "label",
+            ""
+        )
+    ).strip().lower()
 
-            # Open image using PIL
-            pil_image = Image.open(
-                image_path
-            ).convert("RGB")
+    waste_type = WASTE_MAP.get(
+        top_label
+    )
 
-            # Send image to Hugging Face classifier
-            predictions = classifier(
-                pil_image
-            )
+    if not waste_type:
+        raise ValueError(
+            f"Unsupported AI label: {top_label}"
+        )
+
+except Exception as error:
+
+    print(
+        "AI classification error:",
+        error
+    )
+
+    flash(
+        "The AI could not identify this waste image. "
+        "Please upload a clearer waste photo.",
+        "danger"
+    )
+
+    try:
+        image_path.unlink(
+            missing_ok=True
+        )
+    except Exception:
+        pass
+
+    return render_template(
+        "report.html"
+    )
 
             if not predictions:
 
