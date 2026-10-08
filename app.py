@@ -1,8 +1,10 @@
+import os
 import sqlite3
+import threading
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from uuid import uuid4
-from datetime import datetime, timezone, timedelta
 
 from flask import (
     Flask,
@@ -14,16 +16,9 @@ from flask import (
     session,
     url_for,
 )
-
-from werkzeug.security import (
-    check_password_hash,
-    generate_password_hash,
-)
-
-from werkzeug.utils import secure_filename
-
 from PIL import Image
-import os
+from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
 
 
 # =========================================================
@@ -39,69 +34,50 @@ app.config["SECRET_KEY"] = os.environ.get(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-DATABASE = str(
-    BASE_DIR / "swachhmitra.db"
-)
+DATABASE = str(BASE_DIR / "swachhmitra.db")
 
-UPLOAD_FOLDER = (
-    BASE_DIR / "static" / "uploads"
-)
+UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
-UPLOAD_FOLDER.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-app.config["UPLOAD_FOLDER"] = str(
-    UPLOAD_FOLDER
-)
-
-app.config["MAX_CONTENT_LENGTH"] = (
-    5 * 1024 * 1024
-)
+app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 
 
 # =========================================================
 # CONSTANTS
 # =========================================================
 
-ALLOWED_EXTENSIONS = {
-    "png",
-    "jpg",
-    "jpeg",
-    "webp"
-}
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp"}
 
-ADMIN_EMAIL = "admin@swachhmitra.com"
-ADMIN_PASSWORD = "admin123"
+# Can be overridden with Render environment variables
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@swachhmitra.com")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
-# Existing Hugging Face model
-HF_MODEL_NAME = "yangy50/garbage-classification"
+# Hugging Face model used for waste classification.
+# Other models you can test (remember to update WASTE_MAP):
+#   "hlopez/ViT_waste_classifier"
+#   "yangy50/garbage-classification"
+HF_MODEL_NAME = "watersplash/waste-classification"
+
+# Below this confidence the AI result is treated as a weak guess and
+# the waste type chosen by the user (if any) is used instead.
+CONFIDENCE_THRESHOLD = 0.60
 
 
 # =========================================================
 # AI WASTE CLASSIFIER
 # =========================================================
 #
-# The project continues to use the existing Hugging Face
-# garbage-classification model.
+# The model is loaded in a BACKGROUND THREAD right after the
+# server starts, so that:
 #
-# The model is loaded LAZILY:
+#   - importing torch/transformers never happens inside a user
+#     request (which caused gunicorn WORKER TIMEOUT errors)
+#   - the model is loaded only once
 #
-#     Server starts
-#          ↓
-#     No AI model loaded
-#          ↓
-#     User submits image
-#          ↓
-#     Hugging Face model loads
-#          ↓
-#     Image classified
-#
-# This avoids loading the large model during every request
-# and avoids loading it during application import.
+# If a user uploads before the model has finished loading, the
+# app asks them to try again (or uses their manual selection).
 # =========================================================
-import threading
 
 classifier = None
 classifier_error = None
@@ -159,50 +135,63 @@ def get_classifier():
 
 def warm_up_classifier():
     """Load the model in the background right after startup."""
+
     try:
         get_classifier()
     except Exception as error:
         print("AI warm-up failed:", error)
 
+
 # =========================================================
-# AI LABEL → PROJECT WASTE TYPE
+# AI LABEL -> PROJECT WASTE TYPE
+# =========================================================
+#
+# Labels of "watersplash/waste-classification":
+#   battery, biological, brown-grass, cardboard, clothes,
+#   green-glass, metal, paper, plastic, shoes, trash,
+#   white-glass
+#
+# normalize_ai_label() converts hyphens/underscores to spaces
+# and lowercases, so "Green-Glass" becomes "green glass".
+# Check the exact labels in the model's config.json (id2label)
+# and in your Render logs ("AI predictions:").
 # =========================================================
 
 WASTE_MAP = {
-    "plastic": "Plastic Waste",
-    "plastic waste": "Plastic Waste",
+    "battery": "E-Waste",
 
-    "paper": "Dry Waste",
-    "paper waste": "Dry Waste",
+    "biological": "Wet Waste",
+    "brown grass": "Wet Waste",
 
     "cardboard": "Dry Waste",
-    "cardboard waste": "Dry Waste",
-
-    "glass": "Dry Waste",
-    "glass waste": "Dry Waste",
-
+    "paper": "Dry Waste",
+    "clothes": "Dry Waste",
+    "shoes": "Dry Waste",
     "metal": "Dry Waste",
-    "metal waste": "Dry Waste",
+    "green glass": "Dry Waste",
+    "white glass": "Dry Waste",
+    "glass": "Dry Waste",
+
+    "plastic": "Plastic Waste",
+    "plastic waste": "Plastic Waste",
+    "plastics": "Plastic Waste",
 
     "trash": "Mixed Waste",
-    "trash waste": "Mixed Waste",
-
     "mixed": "Mixed Waste",
     "mixed waste": "Mixed Waste",
+
+    # Labels used by "hlopez/ViT_waste_classifier"
+    "organic": "Wet Waste",
+    "carton": "Dry Waste",
+    "general": "Mixed Waste",
+    "dangerous": "E-Waste",
 }
 
 
 def normalize_ai_label(label):
     """
     Convert the raw Hugging Face label into a clean
-    lowercase string.
-
-    This handles labels such as:
-
-        plastic
-        Plastic
-        plastic waste
-        PLASTIC WASTE
+    lowercase string, e.g. "Green-Glass" -> "green glass".
     """
 
     if label is None:
@@ -210,16 +199,10 @@ def normalize_ai_label(label):
 
     label = str(label).strip().lower()
 
-    # Replace underscores/hyphens with spaces
     label = label.replace("_", " ")
     label = label.replace("-", " ")
 
-    # Remove duplicate spaces
-    label = " ".join(
-        label.split()
-    )
-
-    return label
+    return " ".join(label.split())
 
 
 def map_ai_waste_type(label):
@@ -228,36 +211,39 @@ def map_ai_waste_type(label):
     of the project's waste categories.
     """
 
-    normalized_label = normalize_ai_label(
-        label
-    )
+    normalized_label = normalize_ai_label(label)
 
     # Direct mapping
     if normalized_label in WASTE_MAP:
+        return WASTE_MAP[normalized_label]
 
-        return WASTE_MAP[
-            normalized_label
-        ]
+    # Flexible matching
+    if "battery" in normalized_label:
+        return "E-Waste"
 
-    # More flexible matching
+    if (
+        "biological" in normalized_label
+        or "organic" in normalized_label
+        or "grass" in normalized_label
+        or "food" in normalized_label
+    ):
+        return "Wet Waste"
+
     if "plastic" in normalized_label:
-
         return "Plastic Waste"
 
     if (
         "paper" in normalized_label
         or "cardboard" in normalized_label
+        or "carton" in normalized_label
         or "glass" in normalized_label
         or "metal" in normalized_label
+        or "cloth" in normalized_label
+        or "shoe" in normalized_label
     ):
-
         return "Dry Waste"
 
-    if (
-        "trash" in normalized_label
-        or "mixed" in normalized_label
-    ):
-
+    if "trash" in normalized_label or "mixed" in normalized_label:
         return "Mixed Waste"
 
     return None
@@ -271,10 +257,7 @@ def get_db():
 
     if "db" not in g:
 
-        g.db = sqlite3.connect(
-            DATABASE
-        )
-
+        g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
 
     return g.db
@@ -283,13 +266,9 @@ def get_db():
 @app.teardown_appcontext
 def close_db(error=None):
 
-    db = g.pop(
-        "db",
-        None
-    )
+    db = g.pop("db", None)
 
     if db is not None:
-
         db.close()
 
 
@@ -299,13 +278,9 @@ def close_db(error=None):
 
 def init_db():
 
-    db = sqlite3.connect(
-        DATABASE
-    )
+    db = sqlite3.connect(DATABASE)
 
-    # =====================================================
-    # USERS TABLE
-    # =====================================================
+    # ---------------- USERS TABLE ----------------
 
     db.execute(
         """
@@ -323,9 +298,7 @@ def init_db():
         """
     )
 
-    # =====================================================
-    # REPORTS TABLE
-    # =====================================================
+    # ---------------- REPORTS TABLE ----------------
 
     db.execute(
         """
@@ -347,9 +320,7 @@ def init_db():
         """
     )
 
-    # =====================================================
-    # DUSTBINS TABLE
-    # =====================================================
+    # ---------------- DUSTBINS TABLE ----------------
 
     db.execute(
         """
@@ -366,24 +337,17 @@ def init_db():
         """
     )
 
-    # =====================================================
-    # BACKWARD COMPATIBILITY - USERS
-    # =====================================================
+    # ---------------- BACKWARD COMPATIBILITY: USERS ----------------
 
     user_columns = [
         row[1]
-        for row in db.execute(
-            "PRAGMA table_info(users)"
-        ).fetchall()
+        for row in db.execute("PRAGMA table_info(users)").fetchall()
     ]
 
     if "full_name" not in user_columns:
 
         db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN full_name TEXT DEFAULT ''
-            """
+            "ALTER TABLE users ADD COLUMN full_name TEXT DEFAULT ''"
         )
 
         if "name" in user_columns:
@@ -397,77 +361,42 @@ def init_db():
             )
 
     if "address" not in user_columns:
-
-        db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN address TEXT DEFAULT ''
-            """
-        )
+        db.execute("ALTER TABLE users ADD COLUMN address TEXT DEFAULT ''")
 
     if "phone" not in user_columns:
-
-        db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN phone TEXT DEFAULT ''
-            """
-        )
+        db.execute("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''")
 
     if "profile_image" not in user_columns:
-
         db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN profile_image TEXT DEFAULT ''
-            """
+            "ALTER TABLE users ADD COLUMN profile_image TEXT DEFAULT ''"
         )
 
     if "is_admin" not in user_columns:
-
         db.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN is_admin INTEGER DEFAULT 0
-            """
+            "ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0"
         )
 
-    # =====================================================
-    # BACKWARD COMPATIBILITY - REPORTS
-    # =====================================================
+    # ---------------- BACKWARD COMPATIBILITY: REPORTS ----------------
 
     report_columns = [
         row[1]
-        for row in db.execute(
-            "PRAGMA table_info(reports)"
-        ).fetchall()
+        for row in db.execute("PRAGMA table_info(reports)").fetchall()
     ]
 
     if "latitude" not in report_columns:
-
         db.execute(
-            """
-            ALTER TABLE reports
-            ADD COLUMN latitude TEXT DEFAULT ''
-            """
+            "ALTER TABLE reports ADD COLUMN latitude TEXT DEFAULT ''"
         )
 
     if "longitude" not in report_columns:
-
         db.execute(
-            """
-            ALTER TABLE reports
-            ADD COLUMN longitude TEXT DEFAULT ''
-            """
+            "ALTER TABLE reports ADD COLUMN longitude TEXT DEFAULT ''"
         )
 
     if "anonymous" not in report_columns:
 
         db.execute(
-            """
-            ALTER TABLE reports
-            ADD COLUMN anonymous INTEGER DEFAULT 0
-            """
+            "ALTER TABLE reports ADD COLUMN anonymous INTEGER DEFAULT 0"
         )
 
         if "is_anonymous" in report_columns:
@@ -479,9 +408,7 @@ def init_db():
                 """
             )
 
-    # =====================================================
-    # DEMO DUSTBIN LOCATIONS
-    # =====================================================
+    # ---------------- DEMO DUSTBIN LOCATIONS ----------------
 
     demo_dustbins = [
 
@@ -615,16 +542,10 @@ def init_db():
             demo_dustbins
         )
 
-    # =====================================================
-    # DEFAULT ADMIN
-    # =====================================================
+    # ---------------- DEFAULT ADMIN ----------------
 
     admin = db.execute(
-        """
-        SELECT id
-        FROM users
-        WHERE email = ?
-        """,
+        "SELECT id FROM users WHERE email = ?",
         (ADMIN_EMAIL,)
     ).fetchone()
 
@@ -643,9 +564,7 @@ def init_db():
             (
                 "Administrator",
                 ADMIN_EMAIL,
-                generate_password_hash(
-                    ADMIN_PASSWORD
-                )
+                generate_password_hash(ADMIN_PASSWORD)
             )
         )
 
@@ -664,19 +583,11 @@ def login_required(view):
 
         if "user_id" not in session:
 
-            flash(
-                "Please login first.",
-                "warning"
-            )
+            flash("Please login first.", "warning")
 
-            return redirect(
-                url_for("login")
-            )
+            return redirect(url_for("login"))
 
-        return view(
-            *args,
-            **kwargs
-        )
+        return view(*args, **kwargs)
 
     return wrapped_view
 
@@ -692,41 +603,24 @@ def admin_required(view):
 
         if "user_id" not in session:
 
-            flash(
-                "Please login first.",
-                "warning"
-            )
+            flash("Please login first.", "warning")
 
-            return redirect(
-                url_for("login")
-            )
+            return redirect(url_for("login"))
 
         db = get_db()
 
         user = db.execute(
-            """
-            SELECT *
-            FROM users
-            WHERE id = ?
-            """,
+            "SELECT * FROM users WHERE id = ?",
             (session["user_id"],)
         ).fetchone()
 
         if not user or not user["is_admin"]:
 
-            flash(
-                "Administrator access required.",
-                "danger"
-            )
+            flash("Administrator access required.", "danger")
 
-            return redirect(
-                url_for("user_dashboard")
-            )
+            return redirect(url_for("user_dashboard"))
 
-        return view(
-            *args,
-            **kwargs
-        )
+        return view(*args, **kwargs)
 
     return wrapped_view
 
@@ -1272,10 +1166,7 @@ TRANSLATIONS = {
 @app.context_processor
 def inject_globals():
 
-    current_language = session.get(
-        "language",
-        "mr"
-    )
+    current_language = session.get("language", "mr")
 
     db = get_db()
 
@@ -1286,11 +1177,7 @@ def inject_globals():
     if "user_id" in session:
 
         user = db.execute(
-            """
-            SELECT *
-            FROM users
-            WHERE id = ?
-            """,
+            "SELECT * FROM users WHERE id = ?",
             (session["user_id"],)
         ).fetchone()
 
@@ -1298,38 +1185,18 @@ def inject_globals():
 
             is_logged_in = True
 
-            current_user_name = (
-                user["full_name"]
-                or ""
-            )
+            current_user_name = user["full_name"] or ""
 
             if user["is_admin"]:
-
                 current_user_role = "admin"
 
     return {
-
-        "current_language":
-            current_language,
-
-        "supported_languages":
-            SUPPORTED_LANGUAGES,
-
-        "t":
-            TRANSLATIONS.get(
-                current_language,
-                TRANSLATIONS["mr"]
-            ),
-
-        "is_logged_in":
-            is_logged_in,
-
-        "current_user_name":
-            current_user_name,
-
-        "current_user_role":
-            current_user_role,
-
+        "current_language": current_language,
+        "supported_languages": SUPPORTED_LANGUAGES,
+        "t": TRANSLATIONS.get(current_language, TRANSLATIONS["mr"]),
+        "is_logged_in": is_logged_in,
+        "current_user_name": current_user_name,
+        "current_user_role": current_user_role,
     }
 
 
@@ -1348,26 +1215,13 @@ def to_ist(value):
         utc_time = datetime.strptime(
             value,
             "%Y-%m-%d %H:%M:%S"
-        ).replace(
-            tzinfo=timezone.utc
-        )
+        ).replace(tzinfo=timezone.utc)
 
-        ist_time = (
-            utc_time
-            + timedelta(
-                hours=5,
-                minutes=30
-            )
-        )
+        ist_time = utc_time + timedelta(hours=5, minutes=30)
 
-        return ist_time.strftime(
-            "%d-%m-%Y %I:%M:%S %p IST"
-        )
+        return ist_time.strftime("%d-%m-%Y %I:%M:%S %p IST")
 
-    except (
-        ValueError,
-        TypeError
-    ):
+    except (ValueError, TypeError):
 
         return value
 
@@ -1379,122 +1233,71 @@ def to_ist(value):
 @app.route("/")
 def home():
 
-    return render_template(
-        "home.html"
-    )
+    return render_template("home.html")
 
 
 # =========================================================
 # LANGUAGE
 # =========================================================
 
-@app.route(
-    "/set-language/<language>"
-)
+@app.route("/set-language/<language>")
 def set_language(language):
 
     if language not in SUPPORTED_LANGUAGES:
-
         language = "mr"
 
     session["language"] = language
 
-    return redirect(
-        request.referrer
-        or url_for("home")
-    )
+    return redirect(request.referrer or url_for("home"))
 
 
 # =========================================================
 # REGISTER
 # =========================================================
 
-@app.route(
-    "/register",
-    methods=["GET", "POST"]
-)
+@app.route("/register", methods=["GET", "POST"])
 def register():
 
     if request.method == "POST":
 
-        full_name = request.form.get(
-            "full_name",
-            ""
-        ).strip()
+        full_name = request.form.get("full_name", "").strip()
 
-        email = request.form.get(
-            "email",
-            ""
-        ).strip().lower()
+        email = request.form.get("email", "").strip().lower()
 
-        password = request.form.get(
-            "password",
-            ""
-        )
+        password = request.form.get("password", "")
 
-        confirm_password = request.form.get(
-            "confirm_password",
-            ""
-        )
+        confirm_password = request.form.get("confirm_password", "")
 
-        if (
-            not full_name
-            or not email
-            or not password
-        ):
+        if not full_name or not email or not password:
 
-            flash(
-                "Please fill all required fields.",
-                "danger"
-            )
+            flash("Please fill all required fields.", "danger")
 
-            return render_template(
-                "register.html"
-            )
+            return render_template("register.html")
 
         if password != confirm_password:
 
-            flash(
-                "Passwords do not match.",
-                "danger"
-            )
+            flash("Passwords do not match.", "danger")
 
-            return render_template(
-                "register.html"
-            )
+            return render_template("register.html")
 
         if len(password) < 6:
 
-            flash(
-                "Password must be at least 6 characters.",
-                "danger"
-            )
+            flash("Password must be at least 6 characters.", "danger")
 
-            return render_template(
-                "register.html"
-            )
+            return render_template("register.html")
 
         db = get_db()
 
         existing = db.execute(
-            """
-            SELECT id
-            FROM users
-            WHERE email = ?
-            """,
+            "SELECT id FROM users WHERE email = ?",
             (email,)
         ).fetchone()
 
         if existing:
 
-            flash(
-                "Email already registered.",
-                "danger"
-            )
+            flash("Email already registered.", "danger")
 
-            return render_template(
-                "register.html"
-            )
+            return render_template("register.html")
 
         db.execute(
             """
@@ -1508,118 +1311,67 @@ def register():
             (
                 full_name,
                 email,
-                generate_password_hash(
-                    password
-                )
+                generate_password_hash(password)
             )
         )
 
         db.commit()
 
-        flash(
-            "Registration successful. Please login.",
-            "success"
-        )
+        flash("Registration successful. Please login.", "success")
 
-        return redirect(
-            url_for("login")
-        )
+        return redirect(url_for("login"))
 
-    return render_template(
-        "register.html"
-    )
+    return render_template("register.html")
 
 
 # =========================================================
 # LOGIN
 # =========================================================
 
-@app.route(
-    "/login",
-    methods=["GET", "POST"]
-)
+@app.route("/login", methods=["GET", "POST"])
 def login():
 
     if request.method == "POST":
 
-        email = request.form.get(
-            "email",
-            ""
-        ).strip().lower()
+        email = request.form.get("email", "").strip().lower()
 
-        password = request.form.get(
-            "password",
-            ""
-        )
+        password = request.form.get("password", "")
 
         db = get_db()
 
         user = db.execute(
-            """
-            SELECT *
-            FROM users
-            WHERE email = ?
-            """,
+            "SELECT * FROM users WHERE email = ?",
             (email,)
         ).fetchone()
 
-        if (
-            user
-            and check_password_hash(
-                user["password_hash"],
-                password
-            )
-        ):
+        if user and check_password_hash(user["password_hash"], password):
 
             session.clear()
 
             session["user_id"] = user["id"]
 
             if user["is_admin"]:
+                return redirect(url_for("admin_dashboard"))
 
-                return redirect(
-                    url_for(
-                        "admin_dashboard"
-                    )
-                )
+            return redirect(url_for("user_dashboard"))
 
-            return redirect(
-                url_for(
-                    "user_dashboard"
-                )
-            )
+        flash("Invalid email or password.", "danger")
 
-        flash(
-            "Invalid email or password.",
-            "danger"
-        )
-
-    return render_template(
-        "login.html"
-    )
+    return render_template("login.html")
 
 
 # =========================================================
 # ADMIN LOGIN
 # =========================================================
 
-@app.route(
-    "/admin-login",
-    methods=["GET", "POST"]
-)
+@app.route("/admin-login", methods=["GET", "POST"])
 def admin_login():
 
     if request.method == "POST":
 
-        email = request.form.get(
-            "email",
-            ""
-        ).strip().lower()
+        email = request.form.get("email", "").strip().lower()
 
-        password = request.form.get(
-            "password",
-            ""
-        )
+        password = request.form.get("password", "")
 
         db = get_db()
 
@@ -1633,32 +1385,17 @@ def admin_login():
             (email,)
         ).fetchone()
 
-        if (
-            user
-            and check_password_hash(
-                user["password_hash"],
-                password
-            )
-        ):
+        if user and check_password_hash(user["password_hash"], password):
 
             session.clear()
 
             session["user_id"] = user["id"]
 
-            return redirect(
-                url_for(
-                    "admin_dashboard"
-                )
-            )
+            return redirect(url_for("admin_dashboard"))
 
-        flash(
-            "Invalid administrator credentials.",
-            "danger"
-        )
+        flash("Invalid administrator credentials.", "danger")
 
-    return render_template(
-        "admin_login.html"
-    )
+    return render_template("admin_login.html")
 
 
 # =========================================================
@@ -1681,62 +1418,37 @@ def user_dashboard():
         (session["user_id"],)
     ).fetchall()
 
-    return render_template(
-        "user_dashboard.html",
-        reports=reports
-    )
+    return render_template("user_dashboard.html", reports=reports)
 
 
 # =========================================================
 # PROFILE
 # =========================================================
 
-@app.route(
-    "/profile",
-    methods=["GET", "POST"]
-)
+@app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
 
     db = get_db()
 
     user = db.execute(
-        """
-        SELECT *
-        FROM users
-        WHERE id = ?
-        """,
+        "SELECT * FROM users WHERE id = ?",
         (session["user_id"],)
     ).fetchone()
 
     if request.method == "POST":
 
-        full_name = request.form.get(
-            "full_name",
-            ""
-        ).strip()
+        full_name = request.form.get("full_name", "").strip()
 
-        phone = request.form.get(
-            "phone",
-            ""
-        ).strip()
+        phone = request.form.get("phone", "").strip()
 
-        address = request.form.get(
-            "address",
-            ""
-        ).strip()
+        address = request.form.get("address", "").strip()
 
         if not full_name:
 
-            flash(
-                "Full name is required.",
-                "danger"
-            )
+            flash("Full name is required.", "danger")
 
-            return render_template(
-                "profile.html",
-                user=user
-            )
+            return render_template("profile.html", user=user)
 
         db.execute(
             """
@@ -1757,99 +1469,60 @@ def profile():
 
         db.commit()
 
-        flash(
-            "Profile updated successfully.",
-            "success"
-        )
+        flash("Profile updated successfully.", "success")
 
-        return redirect(
-            url_for("profile")
-        )
+        return redirect(url_for("profile"))
 
-    return render_template(
-        "profile.html",
-        user=user
-    )
+    return render_template("profile.html", user=user)
 
 
 # =========================================================
 # REPORT WASTE
 # =========================================================
 
-@app.route(
-    "/report",
-    methods=["GET", "POST"]
-)
+def remove_uploaded_image(image_path):
+    """Delete an uploaded image, ignoring any error."""
+
+    try:
+        image_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+@app.route("/report", methods=["GET", "POST"])
 @login_required
 def report_waste():
 
     if request.method == "POST":
 
-        # =====================================================
-        # DESCRIPTION
-        # =====================================================
+        # ---------------- FORM FIELDS ----------------
 
-        description = request.form.get(
-            "description",
-            ""
-        ).strip()
+        description = request.form.get("description", "").strip()
 
-        # =====================================================
-        # LOCATION
-        # =====================================================
+        address = request.form.get("address", "").strip()
 
-        address = request.form.get(
-            "address",
-            ""
-        ).strip()
+        latitude = request.form.get("latitude", "").strip()
 
-        latitude = request.form.get(
-            "latitude",
-            ""
-        ).strip()
+        longitude = request.form.get("longitude", "").strip()
 
-        longitude = request.form.get(
-            "longitude",
-            ""
-        ).strip()
+        anonymous = 1 if request.form.get("anonymous") else 0
 
-        # =====================================================
-        # ANONYMOUS
-        # =====================================================
+        # Waste type chosen manually by the user (if the form has it)
+        manual_type = request.form.get("waste_type", "").strip()
 
-        anonymous = (
-            1
-            if request.form.get("anonymous")
-            else 0
-        )
+        # ---------------- IMAGE ----------------
 
-        # =====================================================
-        # IMAGE
-        # =====================================================
-
-        image = request.files.get(
-            "image"
-        )
+        image = request.files.get("image")
 
         if not image or not image.filename:
 
-            flash(
-                "Please upload a waste image.",
-                "danger"
-            )
+            flash("Please upload a waste image.", "danger")
 
-            return render_template(
-                "report.html"
-            )
+            return render_template("report.html")
 
-        # =====================================================
-        # CHECK FILE EXTENSION
-        # =====================================================
+        # ---------------- CHECK FILE EXTENSION ----------------
 
-        original_filename = (
-            image.filename
-            or ""
-        )
+        original_filename = image.filename or ""
 
         if "." not in original_filename:
 
@@ -1859,15 +1532,9 @@ def report_waste():
                 "danger"
             )
 
-            return render_template(
-                "report.html"
-            )
+            return render_template("report.html")
 
-        extension = (
-            original_filename
-            .rsplit(".", 1)[-1]
-            .lower()
-        )
+        extension = original_filename.rsplit(".", 1)[-1].lower()
 
         if extension not in ALLOWED_EXTENSIONS:
 
@@ -1877,239 +1544,182 @@ def report_waste():
                 "danger"
             )
 
-            return render_template(
-                "report.html"
-            )
+            return render_template("report.html")
 
-        # =====================================================
-        # SAVE IMAGE
-        # =====================================================
+        # ---------------- SAVE IMAGE ----------------
 
-        image_filename = secure_filename(
-            f"{uuid4().hex}.{extension}"
-        )
+        image_filename = secure_filename(f"{uuid4().hex}.{extension}")
 
-        image_path = (
-            UPLOAD_FOLDER
-            / image_filename
-        )
+        image_path = UPLOAD_FOLDER / image_filename
 
         try:
 
-            image.save(
-                image_path
-            )
+            image.save(image_path)
 
         except Exception as error:
 
-            print(
-                "Image save error:",
-                error
-            )
+            print("Image save error:", error)
 
-            flash(
-                "Unable to save the uploaded image.",
-                "danger"
-            )
+            flash("Unable to save the uploaded image.", "danger")
 
-            return render_template(
-                "report.html"
-            )
+            return render_template("report.html")
 
-        # =====================================================
-        # VALIDATE IMAGE
-        # =====================================================
+        # ---------------- VALIDATE IMAGE ----------------
 
         try:
 
-            with Image.open(
-                image_path
-            ) as check_image:
-
+            with Image.open(image_path) as check_image:
                 check_image.verify()
 
         except Exception as error:
 
-            print(
-                "Invalid image error:",
-                error
-            )
+            print("Invalid image error:", error)
 
-            try:
+            remove_uploaded_image(image_path)
 
-                image_path.unlink(
-                    missing_ok=True
-                )
+            flash("The uploaded file is not a valid image.", "danger")
 
-            except Exception:
-                pass
+            return render_template("report.html")
 
-            flash(
-                "The uploaded file is not a valid image.",
-                "danger"
-            )
-
-            return render_template(
-                "report.html"
-            )
-
-        # =====================================================
-        # AI CLASSIFICATION
-        # =====================================================
+        # ---------------- AI CLASSIFICATION ----------------
 
         waste_type = ""
 
         ai_confidence = None
 
-        try:
+        ai_accepted = False
 
-            # Load the existing Hugging Face model
-            # only when classification is required.
+        if classifier is None:
 
-            ai_classifier = get_classifier()
+            # The model is still loading in the background
+            # (or failed to load).
 
-            # Open image safely
-            with Image.open(
-                image_path
-            ) as pil_image:
+            if not manual_type:
 
-                pil_image = pil_image.convert(
-                    "RGB"
+                remove_uploaded_image(image_path)
+
+                flash(
+                    "The AI model is still starting up. "
+                    "Please try again in a minute.",
+                    "warning"
                 )
 
-                # Limit extremely large images before
-                # sending them to the classifier.
-                #
-                # This reduces unnecessary memory usage
-                # while preserving the actual image file.
+                return render_template("report.html")
 
-                max_dimension = 1600
+            waste_type = manual_type
 
-                if (
-                    pil_image.width > max_dimension
-                    or pil_image.height > max_dimension
-                ):
-
-                    pil_image.thumbnail(
-                        (
-                            max_dimension,
-                            max_dimension
-                        )
-                    )
-
-                predictions = ai_classifier(
-                    pil_image
-                )
-
-            if not predictions:
-
-                raise ValueError(
-                    "AI returned no predictions."
-                )
-
-            # =================================================
-            # SORT BY CONFIDENCE
-            # =================================================
-
-            predictions = sorted(
-                predictions,
-                key=lambda item: float(
-                    item.get(
-                        "score",
-                        0
-                    )
-                    or 0
-                ),
-                reverse=True
-            )
-
-            # =================================================
-            # TOP PREDICTION
-            # =================================================
-
-            top_prediction = predictions[0]
-
-            top_label = str(
-                top_prediction.get(
-                    "label",
-                    ""
-                )
-            ).strip()
-
-            ai_confidence = float(
-                top_prediction.get(
-                    "score",
-                    0
-                )
-                or 0
-            )
-
-            # =================================================
-            # MAP AI LABEL
-            # =================================================
-
-            waste_type = map_ai_waste_type(
-                top_label
-            )
-
-            if not waste_type:
-
-                raise ValueError(
-                    "Unsupported AI label: "
-                    + top_label
-                )
-
-            print(
-                "AI prediction:",
-                top_label,
-                "| confidence:",
-                f"{ai_confidence * 100:.2f}%",
-                "| category:",
-                waste_type
-            )
-
-        except Exception as error:
-
-            print(
-                "AI classification error:",
-                error
-            )
+        else:
 
             try:
 
-                image_path.unlink(
-                    missing_ok=True
+                with Image.open(image_path) as pil_image:
+
+                    pil_image = pil_image.convert("RGB")
+
+                    # Limit extremely large images before
+                    # sending them to the classifier.
+
+                    max_dimension = 1600
+
+                    if (
+                        pil_image.width > max_dimension
+                        or pil_image.height > max_dimension
+                    ):
+
+                        pil_image.thumbnail(
+                            (max_dimension, max_dimension)
+                        )
+
+                    predictions = classifier(pil_image)
+
+                if not predictions:
+                    raise ValueError("AI returned no predictions.")
+
+                # Sort by confidence
+                predictions = sorted(
+                    predictions,
+                    key=lambda item: float(item.get("score", 0) or 0),
+                    reverse=True
                 )
 
-            except Exception:
-                pass
+                # Log the top guesses so the model's behaviour is visible
+                print(
+                    "AI predictions:",
+                    [
+                        (
+                            p.get("label"),
+                            round(float(p.get("score", 0) or 0), 3)
+                        )
+                        for p in predictions[:5]
+                    ]
+                )
 
-            flash(
-                "The AI could not identify this waste image. "
-                "Please upload a clearer waste photo.",
-                "danger"
-            )
+                top_prediction = predictions[0]
 
-            return render_template(
-                "report.html"
-            )
+                top_label = str(top_prediction.get("label", "")).strip()
 
-        # =====================================================
-        # REPORT CODE
-        # =====================================================
+                ai_confidence = float(top_prediction.get("score", 0) or 0)
+
+                mapped_type = map_ai_waste_type(top_label)
+
+                if mapped_type and ai_confidence >= CONFIDENCE_THRESHOLD:
+
+                    waste_type = mapped_type
+                    ai_accepted = True
+
+                elif manual_type:
+
+                    # AI is unsure: the user's own choice wins
+                    waste_type = manual_type
+
+                elif mapped_type:
+
+                    # Low confidence, but better than nothing
+                    waste_type = mapped_type
+
+                else:
+
+                    raise ValueError("Unsupported AI label: " + top_label)
+
+                print(
+                    "AI result:",
+                    top_label,
+                    "| confidence:",
+                    f"{ai_confidence * 100:.2f}%",
+                    "| category:",
+                    waste_type
+                )
+
+            except Exception as error:
+
+                print("AI classification error:", error)
+
+                if manual_type:
+
+                    waste_type = manual_type
+
+                else:
+
+                    remove_uploaded_image(image_path)
+
+                    flash(
+                        "The AI could not identify this waste image. "
+                        "Please upload a clearer waste photo.",
+                        "danger"
+                    )
+
+                    return render_template("report.html")
+
+        # ---------------- REPORT CODE ----------------
 
         report_code = (
             "SM-"
-            + datetime.now().strftime(
-                "%Y%m%d"
-            )
+            + datetime.now().strftime("%Y%m%d")
             + "-"
             + uuid4().hex[:6].upper()
         )
 
-        # =====================================================
-        # SAVE REPORT
-        # =====================================================
+        # ---------------- SAVE REPORT ----------------
 
         db = get_db()
 
@@ -2149,62 +1759,46 @@ def report_waste():
 
         except Exception as error:
 
-            print(
-                "Database error:",
-                error
+            print("Database error:", error)
+
+            remove_uploaded_image(image_path)
+
+            flash("Unable to save the garbage report.", "danger")
+
+            return render_template("report.html")
+
+        # ---------------- SUCCESS MESSAGE ----------------
+
+        if ai_accepted:
+
+            ai_message = (
+                f"AI detected: {waste_type} "
+                f"({ai_confidence * 100:.1f}% confidence)."
             )
 
-            try:
+        elif ai_confidence is not None:
 
-                image_path.unlink(
-                    missing_ok=True
-                )
-
-            except Exception:
-                pass
-
-            flash(
-                "Unable to save the garbage report.",
-                "danger"
+            ai_message = (
+                f"Waste type recorded as: {waste_type}. "
+                f"The AI was not confident "
+                f"({ai_confidence * 100:.1f}%), so please verify."
             )
 
-            return render_template(
-                "report.html"
-            )
+        else:
 
-        # =====================================================
-        # SUCCESS
-        # =====================================================
-
-        confidence_message = ""
-
-        if ai_confidence is not None:
-
-            confidence_message = (
-                f" ({ai_confidence * 100:.1f}% confidence)"
-            )
+            ai_message = f"Waste type recorded as: {waste_type}."
 
         flash(
-            f"Report submitted successfully! "
-            f"AI detected: {waste_type}"
-            f"{confidence_message}. "
+            f"Report submitted successfully! {ai_message} "
             f"Report ID: {report_code}",
             "success"
         )
 
-        return redirect(
-            url_for(
-                "user_dashboard"
-            )
-        )
+        return redirect(url_for("user_dashboard"))
 
-    # =========================================================
-    # GET
-    # =========================================================
+    # ---------------- GET ----------------
 
-    return render_template(
-        "report.html"
-    )
+    return render_template("report.html")
 
 
 # =========================================================
@@ -2216,10 +1810,6 @@ def report_waste():
 def admin_dashboard():
 
     db = get_db()
-
-    # =====================================================
-    # REPORTS WITH USER INFORMATION
-    # =====================================================
 
     reports = db.execute(
         """
@@ -2234,39 +1824,20 @@ def admin_dashboard():
         """
     ).fetchall()
 
-    # =====================================================
-    # STATISTICS
-    # =====================================================
-
     total_users = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM users
-        WHERE is_admin = 0
-        """
+        "SELECT COUNT(*) FROM users WHERE is_admin = 0"
     ).fetchone()[0]
 
     total_reports = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM reports
-        """
+        "SELECT COUNT(*) FROM reports"
     ).fetchone()[0]
 
     reported = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM reports
-        WHERE status = 'Reported'
-        """
+        "SELECT COUNT(*) FROM reports WHERE status = 'Reported'"
     ).fetchone()[0]
 
     cleaned = db.execute(
-        """
-        SELECT COUNT(*)
-        FROM reports
-        WHERE status = 'Cleaned'
-        """
+        "SELECT COUNT(*) FROM reports WHERE status = 'Cleaned'"
     ).fetchone()[0]
 
     return render_template(
@@ -2283,17 +1854,11 @@ def admin_dashboard():
 # UPDATE REPORT STATUS
 # =========================================================
 
-@app.route(
-    "/admin/report/<int:report_id>/status",
-    methods=["POST"]
-)
+@app.route("/admin/report/<int:report_id>/status", methods=["POST"])
 @admin_required
 def update_report_status(report_id):
 
-    status = request.form.get(
-        "status",
-        ""
-    ).strip()
+    status = request.form.get("status", "").strip()
 
     allowed_statuses = {
         "Reported",
@@ -2306,79 +1871,47 @@ def update_report_status(report_id):
 
     if status not in allowed_statuses:
 
-        flash(
-            "Invalid report status.",
-            "danger"
-        )
+        flash("Invalid report status.", "danger")
 
-        return redirect(
-            url_for("admin_dashboard")
-        )
+        return redirect(url_for("admin_dashboard"))
 
     db = get_db()
 
     db.execute(
-        """
-        UPDATE reports
-        SET status = ?
-        WHERE id = ?
-        """,
-        (
-            status,
-            report_id
-        )
+        "UPDATE reports SET status = ? WHERE id = ?",
+        (status, report_id)
     )
 
     db.commit()
 
-    flash(
-        "Report status updated successfully.",
-        "success"
-    )
+    flash("Report status updated successfully.", "success")
 
-    return redirect(
-        url_for("admin_dashboard")
-    )
+    return redirect(url_for("admin_dashboard"))
 
 
 # =========================================================
 # OLD STATUS ROUTE
 # =========================================================
 
-@app.route(
-    "/report/<int:report_id>/status"
-)
+@app.route("/report/<int:report_id>/status")
 @login_required
 def report_status(report_id):
 
     db = get_db()
 
     report = db.execute(
-        """
-        SELECT *
-        FROM reports
-        WHERE id = ?
-        """,
+        "SELECT * FROM reports WHERE id = ?",
         (report_id,)
     ).fetchone()
 
     if not report:
 
-        flash(
-            "Report not found.",
-            "danger"
-        )
+        flash("Report not found.", "danger")
 
-        return redirect(
-            url_for("user_dashboard")
-        )
+        return redirect(url_for("user_dashboard"))
 
     current_user = db.execute(
-        """
-        SELECT is_admin
-        FROM users
-        WHERE id = ?
-        """,
+        "SELECT is_admin FROM users WHERE id = ?",
         (session["user_id"],)
     ).fetchone()
 
@@ -2387,23 +1920,16 @@ def report_status(report_id):
         and current_user["is_admin"]
     )
 
-    if (
-        report["user_id"] != session["user_id"]
-        and not is_admin
-    ):
+    if report["user_id"] != session["user_id"] and not is_admin:
 
         flash(
             "You do not have permission to view this report.",
             "danger"
         )
 
-        return redirect(
-            url_for("user_dashboard")
-        )
+        return redirect(url_for("user_dashboard"))
 
-    return redirect(
-        url_for("user_dashboard")
-    )
+    return redirect(url_for("user_dashboard"))
 
 
 # =========================================================
@@ -2417,17 +1943,11 @@ def certificate():
     db = get_db()
 
     user = db.execute(
-        """
-        SELECT *
-        FROM users
-        WHERE id = ?
-        """,
+        "SELECT * FROM users WHERE id = ?",
         (session["user_id"],)
     ).fetchone()
 
-    current_date = datetime.now().strftime(
-        "%d %B %Y"
-    )
+    current_date = datetime.now().strftime("%d %B %Y")
 
     return render_template(
         "certificate.html",
@@ -2447,86 +1967,48 @@ def dustbins():
     db = get_db()
 
     dustbin_list = db.execute(
-        """
-        SELECT *
-        FROM dustbins
-        ORDER BY id DESC
-        """
+        "SELECT * FROM dustbins ORDER BY id DESC"
     ).fetchall()
 
-    return render_template(
-        "dustbins.html",
-        dustbins=dustbin_list
-    )
+    return render_template("dustbins.html", dustbins=dustbin_list)
 
 
 # =========================================================
 # ADD DUSTBIN
 # =========================================================
 
-@app.route(
-    "/admin/dustbin/add",
-    methods=["GET", "POST"]
-)
+@app.route("/admin/dustbin/add", methods=["GET", "POST"])
 @admin_required
 def add_dustbin():
 
     if request.method == "POST":
 
-        name = request.form.get(
-            "name",
-            ""
-        ).strip()
+        name = request.form.get("name", "").strip()
 
-        address = request.form.get(
-            "address",
-            ""
-        ).strip()
+        address = request.form.get("address", "").strip()
 
-        latitude = request.form.get(
-            "latitude",
-            ""
-        ).strip()
+        latitude = request.form.get("latitude", "").strip()
 
-        longitude = request.form.get(
-            "longitude",
-            ""
-        ).strip()
+        longitude = request.form.get("longitude", "").strip()
 
-        accepted_waste = request.form.get(
-            "accepted_waste",
-            ""
-        ).strip()
+        accepted_waste = request.form.get("accepted_waste", "").strip()
 
-        description = request.form.get(
-            "description",
-            ""
-        ).strip()
+        description = request.form.get("description", "").strip()
 
-        if (
-            not name
-            or not latitude
-            or not longitude
-        ):
+        if not name or not latitude or not longitude:
 
             flash(
                 "Name, latitude and longitude are required.",
                 "danger"
             )
 
-            return render_template(
-                "add_dustbin.html"
-            )
+            return render_template("add_dustbin.html")
 
         try:
 
-            latitude = float(
-                latitude
-            )
+            latitude = float(latitude)
 
-            longitude = float(
-                longitude
-            )
+            longitude = float(longitude)
 
         except ValueError:
 
@@ -2535,9 +2017,7 @@ def add_dustbin():
                 "danger"
             )
 
-            return render_template(
-                "add_dustbin.html"
-            )
+            return render_template("add_dustbin.html")
 
         db = get_db()
 
@@ -2565,51 +2045,33 @@ def add_dustbin():
 
         db.commit()
 
-        flash(
-            "Dustbin location added successfully.",
-            "success"
-        )
+        flash("Dustbin location added successfully.", "success")
 
-        return redirect(
-            url_for("dustbins")
-        )
+        return redirect(url_for("dustbins"))
 
-    return render_template(
-        "add_dustbin.html"
-    )
+    return render_template("add_dustbin.html")
 
 
 # =========================================================
 # DELETE DUSTBIN
 # =========================================================
 
-@app.route(
-    "/admin/dustbin/<int:dustbin_id>/delete",
-    methods=["POST"]
-)
+@app.route("/admin/dustbin/<int:dustbin_id>/delete", methods=["POST"])
 @admin_required
 def delete_dustbin(dustbin_id):
 
     db = get_db()
 
     db.execute(
-        """
-        DELETE FROM dustbins
-        WHERE id = ?
-        """,
+        "DELETE FROM dustbins WHERE id = ?",
         (dustbin_id,)
     )
 
     db.commit()
 
-    flash(
-        "Dustbin location deleted successfully.",
-        "success"
-    )
+    flash("Dustbin location deleted successfully.", "success")
 
-    return redirect(
-        url_for("dustbins")
-    )
+    return redirect(url_for("dustbins"))
 
 
 # =========================================================
@@ -2620,9 +2082,7 @@ def delete_dustbin(dustbin_id):
 @login_required
 def community_survey():
 
-    return render_template(
-        "community_survey.html"
-    )
+    return render_template("community_survey.html")
 
 
 # =========================================================
@@ -2634,21 +2094,24 @@ def logout():
 
     session.clear()
 
-    flash(
-        "You have been logged out.",
-        "success"
-    )
+    flash("You have been logged out.", "success")
 
-    return redirect(
-        url_for("home")
-    )
+    return redirect(url_for("home"))
 
 
 # =========================================================
-# INITIALIZE DATABASE
+# INITIALIZE DATABASE + START AI MODEL LOADING
 # =========================================================
 
 init_db()
+
+# Load the AI model in the background so that the first user
+# request never has to import torch/transformers (this caused
+# gunicorn WORKER TIMEOUT errors on Render).
+threading.Thread(
+    target=warm_up_classifier,
+    daemon=True
+).start()
 
 
 # =========================================================
@@ -2657,12 +2120,7 @@ init_db()
 
 if __name__ == "__main__":
 
-    port = int(
-        os.environ.get(
-            "PORT",
-            5000
-        )
-    )
+    port = int(os.environ.get("PORT", 5000))
 
     app.run(
         host="0.0.0.0",
