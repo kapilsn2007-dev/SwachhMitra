@@ -101,67 +101,68 @@ HF_MODEL_NAME = "yangy50/garbage-classification"
 # This avoids loading the large model during every request
 # and avoids loading it during application import.
 # =========================================================
+import threading
 
 classifier = None
+classifier_error = None
+_classifier_lock = threading.Lock()
 
 
 def get_classifier():
 
-    global classifier
+    global classifier, classifier_error
 
     if classifier is not None:
         return classifier
 
+    with _classifier_lock:
+
+        # Another thread may have finished loading while we waited
+        if classifier is not None:
+            return classifier
+
+        try:
+
+            print("=================================================")
+            print("Loading Hugging Face AI waste classifier...")
+            print(f"Model: {HF_MODEL_NAME}")
+            print("=================================================")
+
+            from transformers import pipeline
+
+            classifier = pipeline(
+                "image-classification",
+                model=HF_MODEL_NAME,
+                device=-1
+            )
+
+            classifier_error = None
+
+            print("Hugging Face AI classifier loaded successfully.")
+
+            return classifier
+
+        except Exception as error:
+
+            print("=================================================")
+            print("AI CLASSIFIER FAILED TO LOAD")
+            print(str(error))
+            print("=================================================")
+
+            classifier = None
+            classifier_error = error
+
+            raise RuntimeError(
+                "AI waste classifier could not be loaded."
+            ) from error
+
+
+def warm_up_classifier():
+    """Load the model in the background right after startup."""
     try:
-
-        from transformers import pipeline
-
-        print(
-            "================================================="
-        )
-        print(
-            "Loading Hugging Face AI waste classifier..."
-        )
-        print(
-            f"Model: {HF_MODEL_NAME}"
-        )
-        print(
-            "================================================="
-        )
-
-        classifier = pipeline(
-            "image-classification",
-            model=HF_MODEL_NAME,
-            device=-1
-        )
-
-        print(
-            "Hugging Face AI classifier loaded successfully."
-        )
-
-        return classifier
-
+        get_classifier()
     except Exception as error:
-
-        print(
-            "================================================="
-        )
-        print(
-            "AI CLASSIFIER FAILED TO LOAD"
-        )
-        print(
-            str(error)
-        )
-        print(
-            "================================================="
-        )
-
-        classifier = None
-
-        raise RuntimeError(
-            "AI waste classifier could not be loaded."
-        ) from error
-
+        print("AI warm-up failed:", error)
 
 # =========================================================
 # AI LABEL → PROJECT WASTE TYPE
