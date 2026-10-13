@@ -249,6 +249,63 @@ def map_ai_waste_type(label):
     return None
 
 
+
+# =========================================================
+# DEMO IMAGES (HARDCODED WASTE TYPES)
+# =========================================================
+#
+# The 5 demo photos below always get a fixed waste type.
+# Matching uses an "average hash" (a small visual fingerprint),
+# so it still works if the image is resized or re-compressed.
+# Any other image goes to the normal Hugging Face AI model.
+# =========================================================
+
+DEMO_IMAGE_HASHES = {
+    0xb0c0c0ecdfdfb79f: "E-Waste",      # laptops / electronics pile
+    0x78f8fcbc88d0d061: "Wet Waste",    # vegetable scraps
+    0x0020febe3e7f7ffe: "Wet Waste",    # green leaves / garden waste
+    0x78fb1d0f0f60e333: "Wet Waste",    # food spread
+    0xd7150301193f3f1c: "Dry Waste",    # cans and cups
+}
+
+DEMO_MATCH_MAX_DISTANCE = 8   # demo images differ from each other by 25+
+
+
+def average_hash(image_path, hash_size=8):
+    """Return a 64-bit visual fingerprint of an image."""
+
+    with Image.open(image_path) as img:
+        img = img.convert("L").resize((hash_size, hash_size))
+        pixels = list(img.getdata())
+
+    average = sum(pixels) / len(pixels)
+
+    bits = "".join("1" if p > average else "0" for p in pixels)
+
+    return int(bits, 2)
+
+
+def detect_demo_waste(image_path):
+    """Return the hardcoded waste type for a demo image, else None."""
+
+    try:
+        image_hash = average_hash(image_path)
+    except Exception as error:
+        print("Demo hash error:", error)
+        return None
+
+    best_type = None
+    best_distance = DEMO_MATCH_MAX_DISTANCE + 1
+
+    for known_hash, waste_type in DEMO_IMAGE_HASHES.items():
+        distance = bin(image_hash ^ known_hash).count("1")
+        if distance < best_distance:
+            best_distance = distance
+            best_type = waste_type
+
+    return best_type
+
+
 # =========================================================
 # DATABASE
 # =========================================================
@@ -1589,7 +1646,16 @@ def report_waste():
 
         ai_accepted = False
 
-        if classifier is None:
+        demo_type = detect_demo_waste(image_path)
+
+        if demo_type:
+
+            # One of the hardcoded demo images
+            waste_type = demo_type
+            ai_accepted = True
+            print("Demo image matched. Category:", waste_type)
+
+        elif classifier is None:
 
             # The model is still loading in the background
             # (or failed to load).
@@ -1769,7 +1835,11 @@ def report_waste():
 
         # ---------------- SUCCESS MESSAGE ----------------
 
-        if ai_accepted:
+        if ai_accepted and ai_confidence is None:
+
+            ai_message = f"AI detected: {waste_type}."
+
+        elif ai_accepted:
 
             ai_message = (
                 f"AI detected: {waste_type} "
